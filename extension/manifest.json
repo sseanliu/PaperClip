@@ -1,13 +1,19 @@
 {
   "manifest_version": 3,
-  "name": "Tab Out",
+  "name": "PaperClip",
   "version": "1.0.0",
-  "description": "Keep tabs on your tabs. New tab page that groups your open tabs by domain and lets you close them with style.",
+  "description": "Your new tab page becomes a Zotero-style library of every academic paper you've ever opened. Auto-captures and enriches with metadata.",
   "permissions": ["tabs", "activeTab", "storage"],
+  "host_permissions": [
+    "https://export.arxiv.org/*",
+    "https://api.semanticscholar.org/*",
+    "https://api.openreview.net/*",
+    "https://api.crossref.org/*"
+  ],
   "chrome_url_overrides": { "newtab": "index.html" },
   "background": { "service_worker": "background.js" },
   "action": {
-    "default_title": "Tab Out",
+    "default_title": "PaperClip",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png"
