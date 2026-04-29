@@ -56,28 +56,56 @@ function fallbackTitle(rawTitle) {
     .trim();
 }
 
+// Per-tab dedup: tabId → canonicalId of the last paper we logged on that tab.
+// Used so onUpdated firing multiple times during one navigation only counts
+// a single visit.
+const lastCapturedByTab = new Map();
+
 /**
- * Upsert a paper into storage. Idempotent: re-visiting the same paper just
- * bumps lastSeenAt + visitCount.
+ * Upsert a paper into storage.
+ *
+ * mode:
+ *   'visit'    — real navigation. Bump visitCount + lastSeenAt if the tab's
+ *                paper changed; otherwise just refresh title if missing.
+ *   'discover' — found via tab scan / backfill. Add only if absent.
+ *                Doesn't bump visitCount or lastSeenAt for existing entries.
  */
-async function capturePaper(tab) {
+async function capturePaper(tab, mode = 'visit') {
   if (!tab || !tab.url) return;
   const cls = classifyPaper(tab.url);
-  if (!cls) return;
+  if (!cls) {
+    if (tab.id != null) lastCapturedByTab.delete(tab.id);
+    return;
+  }
 
   const now = new Date().toISOString();
   const store = await chrome.storage.local.get(PAPERS_KEY);
   const papers = store[PAPERS_KEY] || {};
   const existing = papers[cls.canonicalId];
-  let isNew = false;
+
+  let didMutate = false;
 
   if (existing) {
-    existing.lastSeenAt = now;
-    existing.visitCount = (existing.visitCount || 0) + 1;
-    existing.url = tab.url;
-    if (!existing.title && tab.title) existing.title = fallbackTitle(tab.title);
+    if (mode === 'visit') {
+      const tabPrev = tab.id != null ? lastCapturedByTab.get(tab.id) : null;
+      const isFreshVisit = tabPrev !== cls.canonicalId;
+      if (isFreshVisit) {
+        existing.lastSeenAt = now;
+        existing.visitCount = (existing.visitCount || 0) + 1;
+        didMutate = true;
+      }
+      if (tab.url && existing.url !== tab.url) {
+        existing.url = tab.url;
+        didMutate = true;
+      }
+      const t = fallbackTitle(tab.title || '');
+      if (!existing.title && t) {
+        existing.title = t;
+        didMutate = true;
+      }
+    }
+    // mode === 'discover' on an existing entry: nothing to do.
   } else {
-    isNew = true;
     papers[cls.canonicalId] = {
       id: cls.canonicalId,
       url: tab.url,
@@ -96,7 +124,11 @@ async function capturePaper(tab) {
       enrichmentStatus: 'pending',
       enrichedAt: null
     };
+    didMutate = true;
   }
+
+  if (tab.id != null) lastCapturedByTab.set(tab.id, cls.canonicalId);
+  if (!didMutate) return;
 
   await chrome.storage.local.set({ [PAPERS_KEY]: papers });
 
@@ -105,6 +137,29 @@ async function capturePaper(tab) {
   if (paper.enrichmentStatus !== 'ok' && paper.enrichmentStatus !== 'unsupported') {
     enrichInBackground(cls.canonicalId);
   }
+}
+
+/**
+ * Scan every currently-open tab and add any papers we don't already have.
+ * Used on extension install, browser startup, and on every new-tab page load.
+ */
+async function backfillExistingTabs() {
+  let added = 0;
+  try {
+    const tabs = await chrome.tabs.query({});
+    for (const t of tabs) {
+      if (!t.url) continue;
+      const cls = classifyPaper(t.url);
+      if (!cls) continue;
+      const before = (await chrome.storage.local.get(PAPERS_KEY))[PAPERS_KEY] || {};
+      if (before[cls.canonicalId]) continue;
+      await capturePaper(t, 'discover');
+      added += 1;
+    }
+  } catch (err) {
+    console.warn('[paperclip] backfill error', err);
+  }
+  return added;
 }
 
 // ─── Metadata enrichment queue ────────────────────────────────────────────────
@@ -154,26 +209,46 @@ async function enrichInBackground(canonicalId) {
 
 // ─── Event listeners ──────────────────────────────────────────────────────────
 
-chrome.runtime.onInstalled.addListener(() => updateBadge());
-chrome.runtime.onStartup.addListener(() => updateBadge());
+chrome.runtime.onInstalled.addListener(() => {
+  updateBadge();
+  backfillExistingTabs();
+});
+
+chrome.runtime.onStartup.addListener(() => {
+  updateBadge();
+  backfillExistingTabs();
+});
 
 chrome.tabs.onCreated.addListener((tab) => {
   updateBadge();
-  // Most tabs are created with about:blank and only get a real URL via
-  // onUpdated, so capture is mostly handled there. But cover the case where
-  // a tab is opened directly to a paper URL.
-  if (tab && tab.url) capturePaper(tab);
+  if (tab && tab.url) capturePaper(tab, 'visit');
 });
 
-chrome.tabs.onRemoved.addListener(() => updateBadge());
+chrome.tabs.onRemoved.addListener((tabId) => {
+  updateBadge();
+  lastCapturedByTab.delete(tabId);
+});
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   updateBadge();
-  // Only act on the final URL once the page has finished loading.
-  if (changeInfo.status === 'complete' && tab && tab.url) {
-    capturePaper(tab);
+  // Capture on URL change (eager — don't wait for load to finish), on load
+  // complete (so we get the final title), and on title-only updates (Chrome
+  // sometimes sets the title after status='complete'). capturePaper dedupes
+  // per-tab so we don't overcount visits when multiple events fire.
+  if (changeInfo.url || changeInfo.status === 'complete' || changeInfo.title) {
+    if (tab && tab.url) capturePaper(tab, 'visit');
+  }
+});
+
+// Message handler: the new-tab page asks us to re-scan tabs whenever it
+// loads, as a safety net for anything we missed.
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (msg && msg.type === 'paperclip:backfill') {
+    backfillExistingTabs().then(count => sendResponse({ ok: true, count }));
+    return true; // keep channel open for async response
   }
 });
 
 // Initial run
 updateBadge();
+backfillExistingTabs();

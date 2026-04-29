@@ -331,6 +331,15 @@ function init() {
   if (greeting) greeting.textContent = getGreeting();
   if (date) date.textContent = getDateDisplay();
   renderLibrary();
+
+  // Ask the service worker to scan all currently-open tabs and add any
+  // papers we don't have yet. Storage.onChanged will trigger a re-render
+  // when new entries land, so the user sees them appear without refreshing.
+  if (chrome.runtime && chrome.runtime.sendMessage) {
+    try {
+      chrome.runtime.sendMessage({ type: 'paperclip:backfill' });
+    } catch {}
+  }
 }
 
 if (document.readyState === 'loading') {
