@@ -44,16 +44,56 @@ async function updateBadge() {
 
 const PAPERS_KEY = 'papers';
 
+const SOURCE_LABELS = {
+  arxiv: 'arXiv',
+  openreview: 'OpenReview',
+  biorxiv: 'bioRxiv',
+  medrxiv: 'medRxiv',
+  acm: 'ACM',
+  ieee: 'IEEE',
+  springer: 'Springer',
+  nature: 'Nature',
+  science: 'Science',
+  nips: 'NeurIPS',
+  mlr: 'PMLR',
+  acl: 'ACL',
+  semanticscholar: 'Semantic Scholar',
+  pdf: 'PDF',
+};
+
+/**
+ * Heuristic: does this string look like a URL or filename, not a real paper
+ * title? Chrome's PDF viewer often sets tab.title to the URL with no scheme
+ * (e.g. "arxiv.org/pdf/2604.22615"), and we don't want that as a "title".
+ */
+function looksLikeUrlOrFilename(s) {
+  if (!s) return false;
+  const t = s.trim();
+  if (/^https?:\/\//i.test(t)) return true;
+  // host/path with no spaces (real titles always have spaces)
+  if (/^[a-z0-9.-]+\.[a-z]{2,}\/\S+$/i.test(t) && !/\s/.test(t)) return true;
+  // bare PDF filename
+  if (/^[\w.-]+\.pdf$/i.test(t)) return true;
+  return false;
+}
+
 /**
  * Fallback title cleanup for when enrichment hasn't run yet. Trims trailing
- * site-name garbage like " - arXiv" or " | OpenReview".
+ * site-name garbage like " - arXiv" or " | OpenReview", and rejects titles
+ * that are just the URL.
  */
-function fallbackTitle(rawTitle) {
-  if (!rawTitle) return '';
-  return rawTitle
+function fallbackTitle(rawTitle, cls) {
+  const cleaned = (rawTitle || '')
     .replace(/\s*[-|–—]\s*(arXiv|OpenReview|bioRxiv|medRxiv|ACM Digital Library|IEEE Xplore|Springer|Nature|Science|NeurIPS|ACL Anthology|Semantic Scholar).*$/i, '')
     .replace(/\s+/g, ' ')
     .trim();
+  if (cleaned && !looksLikeUrlOrFilename(cleaned)) return cleaned;
+  // Build a friendly placeholder from the classification, if available
+  if (cls && cls.sourceId) {
+    const label = SOURCE_LABELS[cls.source] || cls.source;
+    return `${label}:${cls.sourceId}`;
+  }
+  return '';
 }
 
 // Per-tab dedup: tabId → canonicalId of the last paper we logged on that tab.
@@ -98,7 +138,7 @@ async function capturePaper(tab, mode = 'visit') {
         existing.url = tab.url;
         didMutate = true;
       }
-      const t = fallbackTitle(tab.title || '');
+      const t = fallbackTitle(tab.title || '', cls);
       if (!existing.title && t) {
         existing.title = t;
         didMutate = true;
@@ -112,7 +152,7 @@ async function capturePaper(tab, mode = 'visit') {
       source: cls.source,
       sourceId: cls.sourceId,
       doi: cls.doi || null,
-      title: fallbackTitle(tab.title || ''),
+      title: fallbackTitle(tab.title || '', cls),
       authors: [],
       year: null,
       venue: null,
@@ -135,7 +175,7 @@ async function capturePaper(tab, mode = 'visit') {
   // Kick off metadata enrichment for new entries (or retry if previously failed).
   const paper = papers[cls.canonicalId];
   if (paper.enrichmentStatus !== 'ok' && paper.enrichmentStatus !== 'unsupported') {
-    enrichInBackground(cls.canonicalId);
+    scheduleEnrichment(cls.canonicalId);
   }
 }
 
@@ -163,60 +203,96 @@ async function backfillExistingTabs() {
 }
 
 // ─── Metadata enrichment queue ────────────────────────────────────────────────
+//
+// All enrichment runs serially through a single Promise chain with a small
+// throttle delay between requests. arXiv and Semantic Scholar both rate-limit
+// hard — firing 30+ concurrent requests gets most of them rejected. One per
+// second is well within everyone's budget.
 
-const enrichInFlight = new Set();
+const ENRICH_THROTTLE_MS = 900;
 
-async function enrichInBackground(canonicalId) {
-  if (enrichInFlight.has(canonicalId)) return;
-  enrichInFlight.add(canonicalId);
-  try {
-    const store = await chrome.storage.local.get(PAPERS_KEY);
-    const papers = store[PAPERS_KEY] || {};
-    const paper = papers[canonicalId];
-    if (!paper) return;
+const enrichQueued = new Set();
+let enrichChain = Promise.resolve();
 
-    let patches = null;
+function scheduleEnrichment(canonicalId) {
+  if (enrichQueued.has(canonicalId)) return;
+  enrichQueued.add(canonicalId);
+  enrichChain = enrichChain.then(async () => {
     try {
-      patches = await PaperEnrich.enrich(paper);
+      await runEnrichmentOnce(canonicalId);
     } catch (err) {
-      console.warn('[paperclip] enrich error', canonicalId, err);
-      paper.enrichmentStatus = 'failed';
-      paper.enrichedAt = new Date().toISOString();
-      await chrome.storage.local.set({ [PAPERS_KEY]: papers });
-      return;
+      console.warn('[paperclip] enrich queue error', canonicalId, err);
+    } finally {
+      enrichQueued.delete(canonicalId);
     }
+    await new Promise(r => setTimeout(r, ENRICH_THROTTLE_MS));
+  });
+}
 
-    if (patches == null) {
-      paper.enrichmentStatus = 'unsupported';
-      paper.enrichedAt = new Date().toISOString();
-      await chrome.storage.local.set({ [PAPERS_KEY]: papers });
-      return;
-    }
+async function runEnrichmentOnce(canonicalId) {
+  const store = await chrome.storage.local.get(PAPERS_KEY);
+  const papers = store[PAPERS_KEY] || {};
+  const paper = papers[canonicalId];
+  if (!paper) return;
+  if (paper.enrichmentStatus === 'ok' || paper.enrichmentStatus === 'unsupported') return;
 
-    if (patches.title) paper.title = patches.title;
-    if (Array.isArray(patches.authors) && patches.authors.length) paper.authors = patches.authors;
-    if (patches.year != null) paper.year = patches.year;
-    if (patches.venue) paper.venue = patches.venue;
-    if (patches.abstract) paper.abstract = patches.abstract;
-    paper.enrichmentStatus = 'ok';
+  let patches = null;
+  try {
+    patches = await PaperEnrich.enrich(paper);
+  } catch (err) {
+    console.warn('[paperclip] enrich error', canonicalId, err);
+    paper.enrichmentStatus = 'failed';
     paper.enrichedAt = new Date().toISOString();
-
     await chrome.storage.local.set({ [PAPERS_KEY]: papers });
-  } finally {
-    enrichInFlight.delete(canonicalId);
+    return;
+  }
+
+  if (patches == null) {
+    paper.enrichmentStatus = 'unsupported';
+    paper.enrichedAt = new Date().toISOString();
+    await chrome.storage.local.set({ [PAPERS_KEY]: papers });
+    return;
+  }
+
+  if (patches.title) paper.title = patches.title;
+  if (Array.isArray(patches.authors) && patches.authors.length) paper.authors = patches.authors;
+  if (patches.year != null) paper.year = patches.year;
+  if (patches.venue) paper.venue = patches.venue;
+  if (patches.abstract) paper.abstract = patches.abstract;
+  paper.enrichmentStatus = 'ok';
+  paper.enrichedAt = new Date().toISOString();
+
+  await chrome.storage.local.set({ [PAPERS_KEY]: papers });
+}
+
+/**
+ * Find any papers that are stuck in 'pending' or 'failed' state and re-queue
+ * them. Called after backfill, on browser startup, and on extension install
+ * so transient errors (rate limits, dropped connections, worker death) get
+ * picked up the next time the user does anything.
+ */
+async function retryStuckEnrichments() {
+  const store = await chrome.storage.local.get(PAPERS_KEY);
+  const papers = store[PAPERS_KEY] || {};
+  for (const p of Object.values(papers)) {
+    if (p.enrichmentStatus === 'pending' || p.enrichmentStatus === 'failed') {
+      scheduleEnrichment(p.id);
+    }
   }
 }
 
 // ─── Event listeners ──────────────────────────────────────────────────────────
 
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener(async () => {
   updateBadge();
-  backfillExistingTabs();
+  await backfillExistingTabs();
+  retryStuckEnrichments();
 });
 
-chrome.runtime.onStartup.addListener(() => {
+chrome.runtime.onStartup.addListener(async () => {
   updateBadge();
-  backfillExistingTabs();
+  await backfillExistingTabs();
+  retryStuckEnrichments();
 });
 
 chrome.tabs.onCreated.addListener((tab) => {
@@ -244,11 +320,15 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 // loads, as a safety net for anything we missed.
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg && msg.type === 'paperclip:backfill') {
-    backfillExistingTabs().then(count => sendResponse({ ok: true, count }));
+    (async () => {
+      const count = await backfillExistingTabs();
+      retryStuckEnrichments();
+      sendResponse({ ok: true, count });
+    })();
     return true; // keep channel open for async response
   }
 });
 
 // Initial run
 updateBadge();
-backfillExistingTabs();
+backfillExistingTabs().then(() => retryStuckEnrichments());
