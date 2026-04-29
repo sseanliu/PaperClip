@@ -8,8 +8,8 @@
  *      kicked off in the background.
  */
 
-// Pull in the URL classifier (same module the new-tab page uses).
-importScripts('papers.js');
+// Pull in the URL classifier and metadata fetcher.
+importScripts('papers.js', 'enrich.js');
 
 // ─── Badge updater ────────────────────────────────────────────────────────────
 
@@ -69,6 +69,7 @@ async function capturePaper(tab) {
   const store = await chrome.storage.local.get(PAPERS_KEY);
   const papers = store[PAPERS_KEY] || {};
   const existing = papers[cls.canonicalId];
+  let isNew = false;
 
   if (existing) {
     existing.lastSeenAt = now;
@@ -76,6 +77,7 @@ async function capturePaper(tab) {
     existing.url = tab.url;
     if (!existing.title && tab.title) existing.title = fallbackTitle(tab.title);
   } else {
+    isNew = true;
     papers[cls.canonicalId] = {
       id: cls.canonicalId,
       url: tab.url,
@@ -97,6 +99,57 @@ async function capturePaper(tab) {
   }
 
   await chrome.storage.local.set({ [PAPERS_KEY]: papers });
+
+  // Kick off metadata enrichment for new entries (or retry if previously failed).
+  const paper = papers[cls.canonicalId];
+  if (paper.enrichmentStatus !== 'ok' && paper.enrichmentStatus !== 'unsupported') {
+    enrichInBackground(cls.canonicalId);
+  }
+}
+
+// ─── Metadata enrichment queue ────────────────────────────────────────────────
+
+const enrichInFlight = new Set();
+
+async function enrichInBackground(canonicalId) {
+  if (enrichInFlight.has(canonicalId)) return;
+  enrichInFlight.add(canonicalId);
+  try {
+    const store = await chrome.storage.local.get(PAPERS_KEY);
+    const papers = store[PAPERS_KEY] || {};
+    const paper = papers[canonicalId];
+    if (!paper) return;
+
+    let patches = null;
+    try {
+      patches = await PaperEnrich.enrich(paper);
+    } catch (err) {
+      console.warn('[paperclip] enrich error', canonicalId, err);
+      paper.enrichmentStatus = 'failed';
+      paper.enrichedAt = new Date().toISOString();
+      await chrome.storage.local.set({ [PAPERS_KEY]: papers });
+      return;
+    }
+
+    if (patches == null) {
+      paper.enrichmentStatus = 'unsupported';
+      paper.enrichedAt = new Date().toISOString();
+      await chrome.storage.local.set({ [PAPERS_KEY]: papers });
+      return;
+    }
+
+    if (patches.title) paper.title = patches.title;
+    if (Array.isArray(patches.authors) && patches.authors.length) paper.authors = patches.authors;
+    if (patches.year != null) paper.year = patches.year;
+    if (patches.venue) paper.venue = patches.venue;
+    if (patches.abstract) paper.abstract = patches.abstract;
+    paper.enrichmentStatus = 'ok';
+    paper.enrichedAt = new Date().toISOString();
+
+    await chrome.storage.local.set({ [PAPERS_KEY]: papers });
+  } finally {
+    enrichInFlight.delete(canonicalId);
+  }
 }
 
 // ─── Event listeners ──────────────────────────────────────────────────────────
