@@ -164,7 +164,7 @@ function renderDetail(p) {
 
   const attachmentsHtml = attachments.length ? `
     <div class="paper-detail-row paper-detail-row-block">
-      <span class="paper-detail-label">Linked tabs</span>
+      <span class="paper-detail-label">Linked URLs</span>
       <ul class="paper-attachment-list">
         ${attachments.map(a => `
           <li class="paper-attachment-item">
