@@ -313,7 +313,25 @@ async function patchPaper(id, mutate) {
 async function deletePaper(id) {
   const store = await chrome.storage.local.get(PAPERS_KEY);
   const papers = store[PAPERS_KEY] || {};
-  if (!papers[id]) return;
+  const paper = papers[id];
+  if (!paper) return;
+
+  // Close any currently-open tabs holding this paper (or any alias from
+  // merged duplicates). Otherwise the next backfill scan will re-add it.
+  const allIds = new Set([id, ...(Array.isArray(paper.aliases) ? paper.aliases : [])]);
+  try {
+    const tabs = await chrome.tabs.query({});
+    const tabIdsToClose = [];
+    for (const t of tabs) {
+      if (!t.url || t.id == null) continue;
+      const cls = classifyPaper(t.url);
+      if (cls && allIds.has(cls.canonicalId)) tabIdsToClose.push(t.id);
+    }
+    if (tabIdsToClose.length) await chrome.tabs.remove(tabIdsToClose);
+  } catch (err) {
+    console.warn('[paperclip] could not close tabs for', id, err);
+  }
+
   delete papers[id];
   await chrome.storage.local.set({ [PAPERS_KEY]: papers });
 }
