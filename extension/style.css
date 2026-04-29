@@ -220,8 +220,18 @@ header {
   letter-spacing: 0.2px;
 }
 
-.paper-open-btn {
+.paper-actions {
   flex-shrink: 0;
+  display: flex;
+  gap: 2px;
+  margin-top: 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.paper-row:hover .paper-actions { opacity: 1; }
+
+.paper-icon-btn {
   width: 28px;
   height: 28px;
   border: none;
@@ -232,16 +242,22 @@ header {
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-top: 2px;
-  opacity: 0;
-  transition: opacity 0.15s, background 0.15s, color 0.15s;
+  transition: background 0.15s, color 0.15s;
 }
 
-.paper-row:hover .paper-open-btn { opacity: 1; }
-
-.paper-open-btn:hover {
+.paper-icon-btn:hover {
   background: var(--warm-gray);
   color: var(--ink);
+}
+
+.paper-row.is-read .paper-read-btn { color: var(--status-active); opacity: 1; }
+.paper-row.is-read .paper-actions { opacity: 1; }
+.paper-row.is-read .paper-read-btn:hover { color: var(--ink); }
+
+/* Read papers fade slightly so unread ones stand out */
+.paper-row.is-read .paper-title,
+.paper-row.is-read .paper-meta {
+  opacity: 0.55;
 }
 
 /* ---- Empty state ---- */

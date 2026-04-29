@@ -126,6 +126,7 @@ function sortPapers(list, openMap) {
 function renderRow(p, openMap) {
   const open = openMap.get(p.id);
   const isOpen = !!open;
+  const isRead = p.readStatus === 'read';
 
   const title = p.title || fallbackTitle('') || p.url;
 
@@ -148,8 +149,12 @@ function renderRow(p, openMap) {
     (p.visitCount && p.visitCount > 1) ? `${p.visitCount} visits` : null,
   ].filter(Boolean);
 
+  const classes = ['paper-row'];
+  if (isOpen) classes.push('is-open');
+  if (isRead) classes.push('is-read');
+
   return `
-    <div class="paper-row${isOpen ? ' is-open' : ''}"
+    <div class="${classes.join(' ')}"
          data-id="${escapeHtml(p.id)}"
          data-url="${escapeHtml(p.url)}"
          ${open ? `data-tab-id="${open.id}" data-window-id="${open.windowId}"` : ''}>
@@ -159,15 +164,35 @@ function renderRow(p, openMap) {
         ${metaParts.length ? `<div class="paper-meta">${escapeHtml(metaParts.join(' · '))}</div>` : ''}
         <div class="paper-sub">${escapeHtml(subParts.join(' · '))}</div>
       </div>
-      <button class="paper-open-btn"
-              data-action="open-new-tab"
-              title="Open in new tab"
-              aria-label="Open in new tab">
-        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M7 17 17 7"/>
-          <path d="M8 7h9v9"/>
-        </svg>
-      </button>
+      <div class="paper-actions">
+        <button class="paper-icon-btn paper-read-btn"
+                data-action="toggle-read"
+                title="${isRead ? 'Mark as unread' : 'Mark as read'}"
+                aria-label="${isRead ? 'Mark as unread' : 'Mark as read'}">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20 6 9 17l-5-5"/>
+          </svg>
+        </button>
+        <button class="paper-icon-btn paper-open-btn"
+                data-action="open-new-tab"
+                title="Open in new tab"
+                aria-label="Open in new tab">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M7 17 17 7"/>
+            <path d="M8 7h9v9"/>
+          </svg>
+        </button>
+        <button class="paper-icon-btn paper-delete-btn"
+                data-action="delete"
+                title="Remove from library"
+                aria-label="Remove from library">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 6h18"/>
+            <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+            <path d="m19 6-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+          </svg>
+        </button>
+      </div>
     </div>
   `;
 }
@@ -212,14 +237,45 @@ async function renderLibrary(filter = '') {
 
 // ─── Event wiring ─────────────────────────────────────────────────────────────
 
+async function patchPaper(id, mutate) {
+  const store = await chrome.storage.local.get(PAPERS_KEY);
+  const papers = store[PAPERS_KEY] || {};
+  if (!papers[id]) return;
+  mutate(papers[id]);
+  await chrome.storage.local.set({ [PAPERS_KEY]: papers });
+}
+
+async function deletePaper(id) {
+  const store = await chrome.storage.local.get(PAPERS_KEY);
+  const papers = store[PAPERS_KEY] || {};
+  if (!papers[id]) return;
+  delete papers[id];
+  await chrome.storage.local.set({ [PAPERS_KEY]: papers });
+}
+
 document.addEventListener('click', async (e) => {
-  const openBtn = e.target.closest('[data-action="open-new-tab"]');
-  if (openBtn) {
+  const actionBtn = e.target.closest('[data-action]');
+  if (actionBtn) {
+    const action = actionBtn.dataset.action;
+    const row = actionBtn.closest('.paper-row');
+    if (!row) return;
     e.stopPropagation();
     e.preventDefault();
-    const row = openBtn.closest('.paper-row');
-    if (row && row.dataset.url) chrome.tabs.create({ url: row.dataset.url });
-    return;
+
+    if (action === 'open-new-tab') {
+      if (row.dataset.url) chrome.tabs.create({ url: row.dataset.url });
+      return;
+    }
+    if (action === 'toggle-read') {
+      await patchPaper(row.dataset.id, p => {
+        p.readStatus = p.readStatus === 'read' ? 'unread' : 'read';
+      });
+      return;
+    }
+    if (action === 'delete') {
+      await deletePaper(row.dataset.id);
+      return;
+    }
   }
 
   const row = e.target.closest('.paper-row');
