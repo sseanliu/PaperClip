@@ -141,6 +141,47 @@ function sortPapers(list) {
   });
 }
 
+// ─── Expanded-row state ──────────────────────────────────────────────────────
+
+const expandedIds = new Set();
+
+function renderDetail(p) {
+  const fullAuthors = (p.authors || []).filter(Boolean).join(', ');
+
+  let abstractHtml;
+  if (p.abstract) {
+    abstractHtml = `<div class="paper-detail-text">${escapeHtml(p.abstract)}</div>`;
+  } else if (p.enrichmentStatus === 'pending') {
+    abstractHtml = '<div class="paper-detail-empty">Fetching abstract…</div>';
+  } else if (p.enrichmentStatus === 'failed') {
+    abstractHtml = '<div class="paper-detail-empty">Couldn\'t fetch abstract — will retry.</div>';
+  } else {
+    abstractHtml = '<div class="paper-detail-empty">No abstract available.</div>';
+  }
+
+  return `
+    <div class="paper-detail" data-detail-for="${escapeHtml(p.id)}">
+      ${fullAuthors ? `
+        <div class="paper-detail-row">
+          <span class="paper-detail-label">Authors</span>
+          <span class="paper-detail-value">${escapeHtml(fullAuthors)}</span>
+        </div>` : ''}
+      ${p.venue ? `
+        <div class="paper-detail-row">
+          <span class="paper-detail-label">Venue</span>
+          <span class="paper-detail-value">${escapeHtml(p.venue)}</span>
+        </div>` : ''}
+      <div class="paper-detail-row paper-detail-row-block">
+        <span class="paper-detail-label">Abstract</span>
+        ${abstractHtml}
+      </div>
+      <div class="paper-detail-row paper-detail-row-block">
+        <a class="paper-detail-link" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">${escapeHtml(p.url)}</a>
+      </div>
+    </div>
+  `;
+}
+
 // ─── Rendering ────────────────────────────────────────────────────────────────
 
 function renderRow(p, openMap) {
@@ -175,9 +216,12 @@ function renderRow(p, openMap) {
     }
   }
 
+  const isExpanded = expandedIds.has(p.id);
+
   const classes = ['paper-row'];
   if (isOpen) classes.push('is-open');
   if (isRead) classes.push('is-read');
+  if (isExpanded) classes.push('is-expanded');
 
   return `
     <div class="${classes.join(' ')}"
@@ -201,9 +245,9 @@ function renderRow(p, openMap) {
           </svg>
         </button>
         <button class="paper-icon-btn paper-open-btn"
-                data-action="open-new-tab"
-                title="Open in new tab"
-                aria-label="Open in new tab">
+                data-action="open-paper"
+                title="${isOpen ? 'Jump to tab' : 'Open paper'}"
+                aria-label="${isOpen ? 'Jump to tab' : 'Open paper'}">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M7 17 17 7"/>
             <path d="M8 7h9v9"/>
@@ -221,6 +265,7 @@ function renderRow(p, openMap) {
         </button>
       </div>
     </div>
+    ${isExpanded ? renderDetail(p) : ''}
   `;
 }
 
@@ -293,7 +338,17 @@ document.addEventListener('click', async (e) => {
     e.stopPropagation();
     e.preventDefault();
 
-    if (action === 'open-new-tab') {
+    if (action === 'open-paper') {
+      // Jump to existing tab if open, otherwise open in a new tab.
+      const tabId = row.dataset.tabId ? parseInt(row.dataset.tabId, 10) : null;
+      const windowId = row.dataset.windowId ? parseInt(row.dataset.windowId, 10) : null;
+      if (tabId) {
+        try {
+          await chrome.tabs.update(tabId, { active: true });
+          if (windowId) await chrome.windows.update(windowId, { focused: true });
+          return;
+        } catch {}
+      }
       if (row.dataset.url) chrome.tabs.create({ url: row.dataset.url });
       return;
     }
@@ -309,21 +364,26 @@ document.addEventListener('click', async (e) => {
     }
   }
 
+  // Click on detail panel (abstract / link / etc.) — don't toggle.
+  if (e.target.closest('.paper-detail')) return;
+
+  // Don't toggle when the user was selecting text.
+  if (window.getSelection && window.getSelection().toString()) return;
+
+  // Click on row body: toggle expand to show/hide abstract.
   const row = e.target.closest('.paper-row');
   if (!row) return;
-  const tabId = row.dataset.tabId ? parseInt(row.dataset.tabId, 10) : null;
-  const windowId = row.dataset.windowId ? parseInt(row.dataset.windowId, 10) : null;
+  const id = row.dataset.id;
+  if (!id) return;
 
-  if (tabId) {
-    try {
-      await chrome.tabs.update(tabId, { active: true });
-      if (windowId) await chrome.windows.update(windowId, { focused: true });
-      return;
-    } catch {
-      // tab disappeared between render and click — fall through to open a new one
-    }
+  if (expandedIds.has(id)) {
+    expandedIds.delete(id);
+  } else {
+    expandedIds.add(id);
   }
-  if (row.dataset.url) chrome.tabs.create({ url: row.dataset.url });
+
+  const search = document.getElementById('paperSearch');
+  renderLibrary(search ? search.value : '');
 });
 
 let searchDebounce;

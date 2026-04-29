@@ -325,6 +325,80 @@ header {
   opacity: 0.55;
 }
 
+/* Expanded row: keep actions visible and slightly highlight */
+.paper-row.is-expanded {
+  background: rgba(255, 253, 249, 0.7);
+}
+.paper-row.is-expanded .paper-actions { opacity: 1; }
+
+/* ---- Detail panel (abstract drawer) ---- */
+.paper-detail {
+  padding: 14px 24px 20px 44px;
+  border-bottom: 1px solid var(--warm-gray);
+  background: rgba(232, 226, 218, 0.18);
+  font-size: 13px;
+  color: var(--ink);
+  line-height: 1.55;
+  animation: paper-detail-enter 0.18s ease both;
+}
+
+@keyframes paper-detail-enter {
+  from { opacity: 0; transform: translateY(-2px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.paper-detail-row {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.paper-detail-row + .paper-detail-row {
+  margin-top: 10px;
+}
+
+.paper-detail-row-block {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+
+.paper-detail-label {
+  font-size: 10.5px;
+  font-weight: 500;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--muted);
+  flex-shrink: 0;
+  min-width: 60px;
+}
+
+.paper-detail-value {
+  flex: 1;
+  min-width: 0;
+}
+
+.paper-detail-text {
+  white-space: pre-wrap;
+}
+
+.paper-detail-empty {
+  font-style: italic;
+  color: var(--muted);
+}
+
+.paper-detail-link {
+  font-size: 12px;
+  color: var(--muted);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  word-break: break-all;
+}
+
+.paper-detail-link:hover {
+  color: var(--ink);
+}
+
 /* ---- Empty state ---- */
 .paper-empty {
   display: flex;
