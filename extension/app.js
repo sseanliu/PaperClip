@@ -411,11 +411,26 @@ document.addEventListener('click', async (e) => {
   // Don't toggle when the user was selecting text.
   if (window.getSelection && window.getSelection().toString()) return;
 
-  // Click on row body: toggle expand to show/hide abstract.
   const row = e.target.closest('.paper-row');
   if (!row) return;
   const id = row.dataset.id;
   if (!id) return;
+
+  // Click on the title text: open the paper (jump to existing tab or open
+  // a new one). Click anywhere else on the row: toggle expand.
+  if (e.target.closest('.paper-title')) {
+    const tabId = row.dataset.tabId ? parseInt(row.dataset.tabId, 10) : null;
+    const windowId = row.dataset.windowId ? parseInt(row.dataset.windowId, 10) : null;
+    if (tabId) {
+      try {
+        await chrome.tabs.update(tabId, { active: true });
+        if (windowId) await chrome.windows.update(windowId, { focused: true });
+        return;
+      } catch {}
+    }
+    if (row.dataset.url) chrome.tabs.create({ url: row.dataset.url });
+    return;
+  }
 
   if (expandedIds.has(id)) {
     expandedIds.delete(id);
