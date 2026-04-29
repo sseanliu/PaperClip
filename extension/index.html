@@ -3,9 +3,8 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Tab Out</title>
+  <title>PaperClip</title>
 
-  <!-- Google Fonts: Newsreader (for headings/numbers) + DM Sans (for body text) -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,300;0,6..72,400;0,6..72,500;1,6..72,300;1,6..72,400&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
 
@@ -14,74 +13,54 @@
 <body>
 <div class="container">
 
-
-
-  <!-- ================================================================
-       HEADER — greeting on the left
-       ================================================================ -->
   <header>
     <div class="header-left">
-      <!-- "Good afternoon" — written by getGreeting() in app.js -->
       <h1 id="greeting"></h1>
-      <!-- "Friday, April 4, 2026" — written by getDateDisplay() in app.js -->
       <div class="date" id="dateDisplay"></div>
     </div>
   </header>
 
-  <!-- ================================================================
-       MAIN CONTENT AREA — two-column layout
-       Left: open tabs (domain/mission cards)
-       Right: saved for later checklist
-       The right column only renders when it has items (JS controls this)
-       ================================================================ -->
-  <div class="dashboard-columns" id="dashboardColumns">
-
-    <!-- Open tabs -->
-    <div class="active-section" id="openTabsSection" style="display:none">
-      <div class="section-header">
-        <h2 id="openTabsSectionTitle">Right now</h2>
-        <div class="section-line"></div>
-        <div class="section-count" id="openTabsSectionCount"></div>
-      </div>
-      <div class="missions" id="openTabsMissions"></div>
+  <section id="paperLibrary" class="paper-library">
+    <div class="section-header">
+      <h2>Library</h2>
+      <div class="section-line"></div>
+      <div class="section-count" id="paperCount"></div>
     </div>
 
-  </div><!-- end .dashboard-columns -->
+    <div class="paper-search-wrap">
+      <svg class="paper-search-icon" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="11" cy="11" r="7"/>
+        <path d="m21 21-4.3-4.3"/>
+      </svg>
+      <input type="search" id="paperSearch" placeholder="Search by title, author, venue…" autocomplete="off">
+    </div>
 
-  <!-- ================================================================
-       FOOTER — global stats + refresh control
-       ================================================================ -->
+    <div id="paperList" class="paper-list"></div>
+
+    <div id="paperEmpty" class="paper-empty" style="display:none">
+      <div data-empty-state="initial">
+        <p class="paper-empty-title">No papers yet.</p>
+        <p class="paper-empty-sub">Open an arXiv page, an OpenReview submission, or any PDF and it'll show up here automatically.</p>
+      </div>
+      <div data-empty-state="no-results" style="display:none">
+        <p class="paper-empty-title">No matches.</p>
+        <p class="paper-empty-sub">Try a different search.</p>
+      </div>
+    </div>
+  </section>
+
   <footer>
-    <div class="footer-stats">
-      <div class="stat">
-        <div class="stat-num" id="statTabs">—</div>
-        <div class="stat-label">Open tabs</div>
-      </div>
-    </div>
     <div class="last-refresh">
-      <span style="color: var(--muted); font-size: 11px;"><a href="https://github.com/zarazhangrui/tab-out" target="_top" style="color: var(--muted); text-decoration: underline; text-underline-offset: 2px;">Tab Out</a> by <a href="https://x.com/zarazhangrui" target="_top" style="color: var(--muted); text-decoration: underline; text-underline-offset: 2px;">Zara</a></span>
+      <span style="color: var(--muted); font-size: 11px;">
+        <a href="https://github.com/sseanliu/PaperClip" target="_top" style="color: var(--muted); text-decoration: underline; text-underline-offset: 2px;">PaperClip</a>
+      </span>
     </div>
   </footer>
 
-</div><!-- end .container -->
-
-<!-- ================================================================
-     TOAST — floats above everything, used for action confirmations
-     Hidden by default via CSS (opacity:0, translateY)
-     ================================================================ -->
-<div class="toast" id="toast">
-  <!-- Checkmark circle icon (Heroicons outline) -->
-  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
-    <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75 11.25 15 15 9.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />
-  </svg>
-  <span id="toastText"></span>
 </div>
 
-<!-- Personal config (gitignored) — defines LOCAL_LANDING_PAGE_PATTERNS etc. -->
-<!-- If the file doesn't exist, that's fine — app.js uses sensible defaults. -->
-<script src="config.local.js" onerror="/* no personal config, that's fine */"></script>
-
-<!-- Main dashboard logic — loads last so the DOM is ready -->
+<!-- URL classifier — must load before app.js -->
+<script src="papers.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
