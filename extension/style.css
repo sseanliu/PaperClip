@@ -619,26 +619,24 @@ header {
 .selection-btn {
   padding: 6px 12px;
   border: none;
-  background: rgba(255, 253, 249, 0.12);
+  background: transparent;
   color: var(--paper);
   border-radius: 9px;
   font: inherit;
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.12s;
+  transition: background 0.12s, color 0.12s;
 }
 
 .selection-btn:hover {
-  background: rgba(255, 253, 249, 0.22);
+  background: rgba(255, 253, 249, 0.18);
 }
 
 .selection-btn-quiet {
-  background: transparent;
   color: rgba(248, 245, 240, 0.7);
 }
 
 .selection-btn-quiet:hover {
-  background: rgba(255, 253, 249, 0.08);
   color: var(--paper);
 }
 

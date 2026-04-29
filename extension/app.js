@@ -463,7 +463,12 @@ function initSelectionBar() {
       const n = await copySelectedToClipboard();
       const original = btn.textContent;
       btn.textContent = `Copied ${n}`;
-      setTimeout(() => { btn.textContent = original; }, 1500);
+      // Show feedback briefly, then drop the selection so the bar slides
+      // away and the user can move on.
+      setTimeout(() => {
+        btn.textContent = original;
+        clearSelection();
+      }, 900);
       return;
     }
     if (action === 'delete') {
@@ -551,14 +556,28 @@ document.addEventListener('click', async (e) => {
     }
   }
 
-  // Click on detail panel (abstract / link / etc.) — don't toggle.
+  // Click on detail panel (abstract / link / etc.) — don't toggle, and keep
+  // any active selection (user is still working with the library).
   if (e.target.closest('.paper-detail')) return;
 
   // Don't toggle when the user was selecting text.
   if (window.getSelection && window.getSelection().toString()) return;
 
   const row = e.target.closest('.paper-row');
-  if (!row) return;
+  if (!row) {
+    // Clicked outside any row. If selection is active and the click wasn't
+    // on UI chrome that should preserve it (selection bar, settings menu),
+    // drop the selection.
+    if (
+      selectedIds.size > 0 &&
+      !e.target.closest('.selection-bar') &&
+      !e.target.closest('.settings-menu') &&
+      !e.target.closest('#settingsBtn')
+    ) {
+      clearSelection();
+    }
+    return;
+  }
   const id = row.dataset.id;
   if (!id) return;
 
