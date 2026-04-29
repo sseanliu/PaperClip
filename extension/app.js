@@ -71,12 +71,33 @@ function getDateDisplay() {
   });
 }
 
+function looksLikeUrlOrFilename(s) {
+  if (!s) return false;
+  const t = s.trim();
+  if (/^https?:\/\//i.test(t)) return true;
+  if (/^[a-z0-9.-]+\.[a-z]{2,}\/\S+$/i.test(t) && !/\s/.test(t)) return true;
+  if (/^[\w.-]+\.pdf$/i.test(t)) return true;
+  return false;
+}
+
 function fallbackTitle(rawTitle) {
   if (!rawTitle) return '';
   return rawTitle
     .replace(/\s*[-|–—]\s*(arXiv|OpenReview|bioRxiv|medRxiv|ACM Digital Library|IEEE Xplore|Springer|Nature|Science|NeurIPS|ACL Anthology|Semantic Scholar).*$/i, '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function displayTitle(p) {
+  const t = p.title || '';
+  if (t && !looksLikeUrlOrFilename(t)) return t;
+  // Title was stored before our placeholder fix, or the page just gave us
+  // its URL. Show a friendly placeholder using the source + ID.
+  if (p.sourceId) {
+    const label = SOURCE_LABELS[p.source] || p.source || '';
+    return `${label}:${p.sourceId}`;
+  }
+  return t || p.url;
 }
 
 // ─── Data access ──────────────────────────────────────────────────────────────
@@ -128,7 +149,7 @@ function renderRow(p, openMap) {
   const isOpen = !!open;
   const isRead = p.readStatus === 'read';
 
-  const title = p.title || fallbackTitle('') || p.url;
+  const title = displayTitle(p);
 
   const authorsList = Array.isArray(p.authors) ? p.authors.filter(Boolean) : [];
   const authorsStr = authorsList.length === 0
@@ -137,12 +158,28 @@ function renderRow(p, openMap) {
       ? authorsList.join(', ')
       : authorsList.slice(0, 3).join(', ') + ' et al.';
 
+  const sourceLabel = SOURCE_LABELS[p.source] || p.source || '';
+  const hasRealMeta = authorsList.length > 0 || p.year || p.venue;
+
   const metaParts = [
     authorsStr,
     p.year ? String(p.year) : '',
     p.venue || '',
-    SOURCE_LABELS[p.source] || p.source || '',
-  ].filter(Boolean);
+    sourceLabel,
+  ].filter(Boolean).map(escapeHtml);
+
+  let statusHtml = '';
+  if (!hasRealMeta) {
+    if (p.enrichmentStatus === 'pending') {
+      statusHtml = '<span class="paper-status paper-status-pending"><span class="paper-status-dot"></span>fetching metadata</span>';
+    } else if (p.enrichmentStatus === 'failed') {
+      statusHtml = '<span class="paper-status paper-status-failed">metadata unavailable · will retry</span>';
+    }
+  }
+
+  const metaInner = statusHtml
+    ? metaParts.concat(statusHtml).join(' · ')
+    : metaParts.join(' · ');
 
   const subParts = [
     timeAgo(p.lastSeenAt),
@@ -161,7 +198,7 @@ function renderRow(p, openMap) {
       <div class="paper-dot" aria-hidden="true"></div>
       <div class="paper-main">
         <div class="paper-title">${escapeHtml(title)}</div>
-        ${metaParts.length ? `<div class="paper-meta">${escapeHtml(metaParts.join(' · '))}</div>` : ''}
+        ${metaInner ? `<div class="paper-meta">${metaInner}</div>` : ''}
         <div class="paper-sub">${escapeHtml(subParts.join(' · '))}</div>
       </div>
       <div class="paper-actions">

@@ -214,6 +214,29 @@ header {
   white-space: nowrap;
 }
 
+.paper-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-style: italic;
+}
+
+.paper-status-pending { color: var(--accent-amber); }
+.paper-status-failed { color: var(--accent-amber); opacity: 0.7; }
+
+.paper-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: paper-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes paper-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+
 .paper-sub {
   font-size: 11px;
   color: var(--muted);
