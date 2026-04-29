@@ -187,7 +187,6 @@ function renderDetail(p) {
 function renderRow(p, openMap) {
   const open = openMap.get(p.id);
   const isOpen = !!open;
-  const isRead = p.readStatus === 'read';
 
   const title = displayTitle(p);
 
@@ -220,7 +219,6 @@ function renderRow(p, openMap) {
 
   const classes = ['paper-row'];
   if (isOpen) classes.push('is-open');
-  if (isRead) classes.push('is-read');
   if (isExpanded) classes.push('is-expanded');
 
   return `
@@ -235,14 +233,6 @@ function renderRow(p, openMap) {
       <div class="paper-col-authors">${authorsStr ? escapeHtml(authorsStr) : '<span class="paper-empty-cell">—</span>'}</div>
       <div class="paper-col-year">${p.year ? escapeHtml(String(p.year)) : '<span class="paper-empty-cell">—</span>'}</div>
       <div class="paper-actions">
-        <button class="paper-icon-btn paper-read-btn"
-                data-action="toggle-read"
-                title="${isRead ? 'Mark as unread' : 'Mark as read'}"
-                aria-label="${isRead ? 'Mark as unread' : 'Mark as read'}">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M20 6 9 17l-5-5"/>
-          </svg>
-        </button>
         <button class="paper-icon-btn paper-open-btn"
                 data-action="open-paper"
                 title="${isOpen ? 'Jump to tab' : 'Open paper'}"
@@ -349,12 +339,6 @@ document.addEventListener('click', async (e) => {
         } catch {}
       }
       if (row.dataset.url) chrome.tabs.create({ url: row.dataset.url });
-      return;
-    }
-    if (action === 'toggle-read') {
-      await patchPaper(row.dataset.id, p => {
-        p.readStatus = p.readStatus === 'read' ? 'unread' : 'read';
-      });
       return;
     }
     if (action === 'delete') {

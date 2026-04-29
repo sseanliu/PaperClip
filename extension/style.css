@@ -146,7 +146,7 @@ header {
 .paper-list-header,
 .paper-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 0.7fr) 56px 92px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.7fr) 56px 62px;
   gap: 16px;
   align-items: center;
 }
@@ -297,16 +297,6 @@ header {
 .paper-icon-btn:hover {
   background: var(--warm-gray);
   color: var(--ink);
-}
-
-.paper-row.is-read .paper-read-btn { color: var(--status-active); opacity: 1; }
-.paper-row.is-read .paper-actions { opacity: 1; }
-.paper-row.is-read .paper-read-btn:hover { color: var(--ink); }
-
-/* Read papers fade slightly so unread ones stand out */
-.paper-row.is-read .paper-title,
-.paper-row.is-read .paper-meta {
-  opacity: 0.55;
 }
 
 /* Expanded row: keep actions visible and slightly highlight */
