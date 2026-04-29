@@ -161,30 +161,20 @@ function renderRow(p, openMap) {
   const sourceLabel = SOURCE_LABELS[p.source] || p.source || '';
   const hasRealMeta = authorsList.length > 0 || p.year || p.venue;
 
-  const metaParts = [
-    authorsStr,
-    p.year ? String(p.year) : '',
-    p.venue || '',
-    sourceLabel,
-  ].filter(Boolean).map(escapeHtml);
+  // Sub-line below title: source · venue · time ago · visits · status
+  const subParts = [];
+  if (sourceLabel) subParts.push(escapeHtml(sourceLabel));
+  if (p.venue) subParts.push(escapeHtml(p.venue));
+  subParts.push(escapeHtml(timeAgo(p.lastSeenAt)));
+  if (p.visitCount && p.visitCount > 1) subParts.push(escapeHtml(`${p.visitCount} visits`));
 
-  let statusHtml = '';
   if (!hasRealMeta) {
     if (p.enrichmentStatus === 'pending') {
-      statusHtml = '<span class="paper-status paper-status-pending"><span class="paper-status-dot"></span>fetching metadata</span>';
+      subParts.push('<span class="paper-status paper-status-pending"><span class="paper-status-dot"></span>fetching metadata</span>');
     } else if (p.enrichmentStatus === 'failed') {
-      statusHtml = '<span class="paper-status paper-status-failed">metadata unavailable · will retry</span>';
+      subParts.push('<span class="paper-status paper-status-failed">metadata unavailable · will retry</span>');
     }
   }
-
-  const metaInner = statusHtml
-    ? metaParts.concat(statusHtml).join(' · ')
-    : metaParts.join(' · ');
-
-  const subParts = [
-    timeAgo(p.lastSeenAt),
-    (p.visitCount && p.visitCount > 1) ? `${p.visitCount} visits` : null,
-  ].filter(Boolean);
 
   const classes = ['paper-row'];
   if (isOpen) classes.push('is-open');
@@ -198,9 +188,10 @@ function renderRow(p, openMap) {
       <div class="paper-dot" aria-hidden="true"></div>
       <div class="paper-main">
         <div class="paper-title">${escapeHtml(title)}</div>
-        ${metaInner ? `<div class="paper-meta">${metaInner}</div>` : ''}
-        <div class="paper-sub">${escapeHtml(subParts.join(' · '))}</div>
+        <div class="paper-sub">${subParts.join(' · ')}</div>
       </div>
+      <div class="paper-col-authors">${authorsStr ? escapeHtml(authorsStr) : '<span class="paper-empty-cell">—</span>'}</div>
+      <div class="paper-col-year">${p.year ? escapeHtml(String(p.year)) : '<span class="paper-empty-cell">—</span>'}</div>
       <div class="paper-actions">
         <button class="paper-icon-btn paper-read-btn"
                 data-action="toggle-read"
@@ -236,6 +227,7 @@ function renderRow(p, openMap) {
 
 async function renderLibrary(filter = '') {
   const list = document.getElementById('paperList');
+  const header = document.getElementById('paperListHeader');
   const countEl = document.getElementById('paperCount');
   const emptyEl = document.getElementById('paperEmpty');
   if (!list) return;
@@ -249,6 +241,7 @@ async function renderLibrary(filter = '') {
 
   if (all.length === 0) {
     list.innerHTML = '';
+    if (header) header.style.display = 'none';
     emptyEl.style.display = 'flex';
     emptyEl.querySelector('[data-empty-state="initial"]').style.display = 'block';
     emptyEl.querySelector('[data-empty-state="no-results"]').style.display = 'none';
@@ -258,6 +251,7 @@ async function renderLibrary(filter = '') {
 
   if (sorted.length === 0) {
     list.innerHTML = '';
+    if (header) header.style.display = 'none';
     emptyEl.style.display = 'flex';
     emptyEl.querySelector('[data-empty-state="initial"]').style.display = 'none';
     emptyEl.querySelector('[data-empty-state="no-results"]').style.display = 'block';
@@ -266,6 +260,7 @@ async function renderLibrary(filter = '') {
   }
 
   emptyEl.style.display = 'none';
+  if (header) header.style.display = 'grid';
   countEl.textContent = q
     ? `${sorted.length} of ${all.length}`
     : `${all.length} paper${all.length === 1 ? '' : 's'}`;
