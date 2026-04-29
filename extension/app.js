@@ -258,7 +258,7 @@ function renderRow(p, openMap) {
          data-url="${escapeHtml(p.url)}"
          ${open ? `data-tab-id="${open.id}" data-window-id="${open.windowId}"` : ''}>
       <div class="paper-main">
-        <div class="paper-title">${escapeHtml(title)}</div>
+        <div class="paper-title"><span class="paper-title-text">${escapeHtml(title)}</span></div>
         <div class="paper-sub">${subParts.join(' · ')}</div>
       </div>
       <div class="paper-col-authors">${authorsStr ? escapeHtml(authorsStr) : '<span class="paper-empty-cell">—</span>'}</div>
@@ -418,7 +418,7 @@ document.addEventListener('click', async (e) => {
 
   // Click on the title text: open the paper (jump to existing tab or open
   // a new one). Click anywhere else on the row: toggle expand.
-  if (e.target.closest('.paper-title')) {
+  if (e.target.closest('.paper-title-text')) {
     const tabId = row.dataset.tabId ? parseInt(row.dataset.tabId, 10) : null;
     const windowId = row.dataset.windowId ? parseInt(row.dataset.windowId, 10) : null;
     if (tabId) {
