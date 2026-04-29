@@ -154,24 +154,22 @@ header {
 }
 
 .settings-btn {
-  width: 36px;
-  height: 36px;
-  border: 1px solid var(--warm-gray);
-  background: var(--card-bg);
+  width: 32px;
+  height: 32px;
+  border: none;
+  background: transparent;
   color: var(--muted);
   cursor: pointer;
-  border-radius: 8px;
+  border-radius: 6px;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
-  box-shadow: 0 1px 3px var(--shadow);
+  transition: color 0.15s, background 0.15s;
 }
 
 .settings-btn:hover {
-  background: var(--card-bg);
   color: var(--ink);
-  border-color: var(--muted);
+  background: var(--warm-gray);
 }
 
 .settings-menu {
