@@ -402,6 +402,13 @@ header {
 }
 .paper-row.is-expanded .paper-actions { opacity: 1; }
 
+/* Starred row: keep the star visible (and filled amber) at all times */
+.paper-row.is-starred .paper-actions { opacity: 1; }
+.paper-star-btn svg { fill: transparent; transition: fill 0.15s; }
+.paper-row.is-starred .paper-star-btn { color: var(--accent-amber); }
+.paper-row.is-starred .paper-star-btn svg { fill: currentColor; }
+.paper-star-btn:hover { color: var(--accent-amber); }
+
 /* ---- Detail panel (abstract drawer) ---- */
 .paper-detail {
   padding: 14px 24px 20px 12px;

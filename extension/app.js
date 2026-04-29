@@ -134,9 +134,12 @@ function paperMatchesFilter(p, q) {
 }
 
 function sortPapers(list) {
-  // Sort purely by when the paper was first added to the library — newest at
-  // top. Open-tab status doesn't affect order; revisits don't either.
+  // Starred papers go to the top. Within each group (starred and unstarred),
+  // sort by when the paper was first added to the library — newest first.
   return list.slice().sort((a, b) => {
+    const aStar = a.starred ? 1 : 0;
+    const bStar = b.starred ? 1 : 0;
+    if (aStar !== bStar) return bStar - aStar;
     return (b.firstSeenAt || '').localeCompare(a.firstSeenAt || '');
   });
 }
@@ -247,10 +250,12 @@ function renderRow(p, openMap) {
   }
 
   const isExpanded = expandedIds.has(p.id);
+  const isStarred = !!p.starred;
 
   const classes = ['paper-row'];
   if (isOpen) classes.push('is-open');
   if (isExpanded) classes.push('is-expanded');
+  if (isStarred) classes.push('is-starred');
 
   return `
     <div class="${classes.join(' ')}"
@@ -264,13 +269,12 @@ function renderRow(p, openMap) {
       <div class="paper-col-authors">${authorsStr ? escapeHtml(authorsStr) : '<span class="paper-empty-cell">—</span>'}</div>
       <div class="paper-col-year">${p.year ? escapeHtml(String(p.year)) : '<span class="paper-empty-cell">—</span>'}</div>
       <div class="paper-actions">
-        <button class="paper-icon-btn paper-open-btn"
-                data-action="open-paper"
-                title="${isOpen ? 'Jump to tab' : 'Open paper'}"
-                aria-label="${isOpen ? 'Jump to tab' : 'Open paper'}">
-          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M7 17 17 7"/>
-            <path d="M8 7h9v9"/>
+        <button class="paper-icon-btn paper-star-btn"
+                data-action="toggle-star"
+                title="${isStarred ? 'Unstar' : 'Star this paper'}"
+                aria-label="${isStarred ? 'Unstar' : 'Star this paper'}">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
           </svg>
         </button>
         <button class="paper-icon-btn paper-delete-btn"
@@ -376,18 +380,10 @@ document.addEventListener('click', async (e) => {
     e.stopPropagation();
     e.preventDefault();
 
-    if (action === 'open-paper') {
-      // Jump to existing tab if open, otherwise open in a new tab.
-      const tabId = row.dataset.tabId ? parseInt(row.dataset.tabId, 10) : null;
-      const windowId = row.dataset.windowId ? parseInt(row.dataset.windowId, 10) : null;
-      if (tabId) {
-        try {
-          await chrome.tabs.update(tabId, { active: true });
-          if (windowId) await chrome.windows.update(windowId, { focused: true });
-          return;
-        } catch {}
-      }
-      if (row.dataset.url) chrome.tabs.create({ url: row.dataset.url });
+    if (action === 'toggle-star') {
+      await patchPaper(row.dataset.id, paper => {
+        paper.starred = !paper.starred;
+      });
       return;
     }
     if (action === 'delete') {
@@ -546,6 +542,7 @@ function mergeImportedPaper(target, incoming) {
   target.attachments = targetAtt;
 
   if (incoming.readStatus === 'read') target.readStatus = 'read';
+  if (incoming.starred) target.starred = true;
 }
 
 async function importLibrary(file) {
