@@ -148,6 +148,7 @@ function sortPapers(list) {
 
 const expandedIds = new Set();
 const selectedIds = new Set();
+const recentlyCopiedIds = new Set();
 
 function renderDetail(p) {
   const fullAuthors = (p.authors || []).filter(Boolean).join(', ');
@@ -253,12 +254,14 @@ function renderRow(p, openMap) {
   const isExpanded = expandedIds.has(p.id);
   const isStarred = !!p.starred;
   const isSelected = selectedIds.has(p.id);
+  const justCopied = recentlyCopiedIds.has(p.id);
 
   const classes = ['paper-row'];
   if (isOpen) classes.push('is-open');
   if (isExpanded) classes.push('is-expanded');
   if (isStarred) classes.push('is-starred');
   if (isSelected) classes.push('is-selected');
+  if (justCopied) classes.push('is-just-copied');
 
   return `
     <div class="${classes.join(' ')}"
@@ -291,12 +294,16 @@ function renderRow(p, openMap) {
         </button>
         <button class="paper-icon-btn paper-copy-btn"
                 data-action="copy-single"
-                title="Copy this paper's data"
-                aria-label="Copy this paper's data">
-          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <rect x="9" y="9" width="13" height="13" rx="2"/>
-            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
-          </svg>
+                title="${justCopied ? 'Copied' : "Copy this paper's data"}"
+                aria-label="${justCopied ? 'Copied' : "Copy this paper's data"}">
+          ${justCopied
+            ? `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                 <path d="M20 6 9 17l-5-5"/>
+               </svg>`
+            : `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                 <rect x="9" y="9" width="13" height="13" rx="2"/>
+                 <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+               </svg>`}
         </button>
         <button class="paper-icon-btn paper-delete-btn"
                 data-action="delete"
@@ -538,13 +545,23 @@ document.addEventListener('click', async (e) => {
     if (action === 'copy-single') {
       const store = await chrome.storage.local.get(PAPERS_KEY);
       const papers = store[PAPERS_KEY] || {};
-      const paper = papers[row.dataset.id];
+      const id = row.dataset.id;
+      const paper = papers[id];
       if (!paper) return;
       try {
         await navigator.clipboard.writeText(formatPaperForCopy(paper));
       } catch (err) {
         console.warn('[paperclip] copy failed', err);
+        return;
       }
+      // Briefly swap the icon to a checkmark as confirmation, then revert.
+      recentlyCopiedIds.add(id);
+      const search = document.getElementById('paperSearch');
+      renderLibrary(search ? search.value : '');
+      setTimeout(() => {
+        recentlyCopiedIds.delete(id);
+        renderLibrary(search ? search.value : '');
+      }, 2000);
       return;
     }
     if (action === 'toggle-select') {

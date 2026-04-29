@@ -446,6 +446,12 @@ header {
 .paper-row.is-starred .paper-star-btn svg { fill: currentColor; }
 .paper-star-btn:hover { color: var(--accent-amber); }
 
+/* Just-copied row: keep actions visible and turn the copy button green
+   for ~2s as confirmation feedback */
+.paper-row.is-just-copied .paper-actions { opacity: 1; }
+.paper-row.is-just-copied .paper-copy-btn { color: var(--status-active); }
+.paper-row.is-just-copied .paper-copy-btn:hover { color: var(--status-active); }
+
 /* ---- Detail panel (abstract drawer) ---- */
 .paper-detail {
   padding: 14px 24px 20px 12px;
