@@ -478,12 +478,196 @@ if (chrome.tabs && chrome.tabs.onCreated && chrome.tabs.onRemoved) {
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 
+// ─── Export / Import ──────────────────────────────────────────────────────────
+
+function downloadJson(filename, obj) {
+  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  // Revoke after the click finishes
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function exportLibrary() {
+  const store = await chrome.storage.local.get(PAPERS_KEY);
+  const papers = store[PAPERS_KEY] || {};
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+  downloadJson(`paperclip-backup-${stamp}.json`, {
+    schema: 'paperclip.library.v1',
+    exportedAt: new Date().toISOString(),
+    paperCount: Object.keys(papers).length,
+    papers,
+  });
+  return { count: Object.keys(papers).length };
+}
+
+function isImportablePaper(p) {
+  return p && typeof p === 'object' && typeof p.id === 'string' && p.id.length > 0;
+}
+
+function mergeImportedPaper(target, incoming) {
+  if (!target.firstSeenAt || (incoming.firstSeenAt && incoming.firstSeenAt < target.firstSeenAt)) {
+    target.firstSeenAt = incoming.firstSeenAt;
+  }
+  if (!target.lastSeenAt || (incoming.lastSeenAt && incoming.lastSeenAt > target.lastSeenAt)) {
+    target.lastSeenAt = incoming.lastSeenAt;
+  }
+  target.visitCount = Math.max(target.visitCount || 0, incoming.visitCount || 0);
+
+  if (!target.title && incoming.title) target.title = incoming.title;
+  if (!target.year && incoming.year) target.year = incoming.year;
+  if (!target.venue && incoming.venue) target.venue = incoming.venue;
+  if (!target.abstract && incoming.abstract) target.abstract = incoming.abstract;
+  if ((!target.authors || target.authors.length === 0) && Array.isArray(incoming.authors) && incoming.authors.length) {
+    target.authors = incoming.authors;
+  }
+  if (!target.doi && incoming.doi) target.doi = incoming.doi;
+
+  target.externalIds = { ...(incoming.externalIds || {}), ...(target.externalIds || {}) };
+
+  const aliasSet = new Set([...(target.aliases || []), ...(incoming.aliases || [])]);
+  target.aliases = [...aliasSet];
+
+  // Merge attachments by URL (union, keep target's title/addedAt on conflict)
+  const targetAtt = Array.isArray(target.attachments) ? target.attachments : [];
+  const incomingAtt = Array.isArray(incoming.attachments) ? incoming.attachments : [];
+  const seenUrls = new Set(targetAtt.map(a => a && a.url));
+  for (const a of incomingAtt) {
+    if (a && a.url && !seenUrls.has(a.url)) {
+      targetAtt.push(a);
+      seenUrls.add(a.url);
+    }
+  }
+  target.attachments = targetAtt;
+
+  if (incoming.readStatus === 'read') target.readStatus = 'read';
+}
+
+async function importLibrary(file) {
+  const text = await file.text();
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    return { error: 'Could not parse the file as JSON.' };
+  }
+  // Accept envelope shape { papers: {...} } or raw map { id: paper, ... }
+  const incoming = (parsed && typeof parsed === 'object' && parsed.papers && typeof parsed.papers === 'object')
+    ? parsed.papers
+    : parsed;
+  if (!incoming || typeof incoming !== 'object') {
+    return { error: 'Unexpected file shape — expected an object of papers.' };
+  }
+
+  const store = await chrome.storage.local.get(PAPERS_KEY);
+  const papers = store[PAPERS_KEY] || {};
+
+  let added = 0, merged = 0, skipped = 0;
+  for (const [id, item] of Object.entries(incoming)) {
+    if (!isImportablePaper(item)) { skipped++; continue; }
+    if (item.id !== id) item.id = id;
+    if (papers[id]) {
+      mergeImportedPaper(papers[id], item);
+      merged++;
+    } else {
+      papers[id] = item;
+      added++;
+    }
+  }
+
+  await chrome.storage.local.set({ [PAPERS_KEY]: papers });
+  return { added, merged, skipped };
+}
+
+// ─── Settings menu wiring ─────────────────────────────────────────────────────
+
+function setSettingsStatus(text) {
+  const el = document.getElementById('settingsStatus');
+  if (!el) return;
+  el.textContent = text;
+  el.hidden = false;
+  clearTimeout(setSettingsStatus._t);
+  setSettingsStatus._t = setTimeout(() => { el.hidden = true; }, 4000);
+}
+
+async function refreshSettingsInfo() {
+  const infoEl = document.getElementById('settingsInfo');
+  if (!infoEl) return;
+  const store = await chrome.storage.local.get(PAPERS_KEY);
+  const papers = store[PAPERS_KEY] || {};
+  const count = Object.keys(papers).length;
+  const bytes = new Blob([JSON.stringify(papers)]).size;
+  const sizeStr = bytes >= 1024 * 1024
+    ? (bytes / 1024 / 1024).toFixed(2) + ' MB'
+    : (bytes / 1024).toFixed(1) + ' KB';
+  infoEl.textContent = `${count} paper${count === 1 ? '' : 's'} · ${sizeStr} stored locally`;
+}
+
+function initSettingsMenu() {
+  const btn = document.getElementById('settingsBtn');
+  const menu = document.getElementById('settingsMenu');
+  const fileInput = document.getElementById('importFile');
+  if (!btn || !menu || !fileInput) return;
+
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (menu.hidden) {
+      menu.hidden = false;
+      refreshSettingsInfo();
+    } else {
+      menu.hidden = true;
+    }
+  });
+
+  document.addEventListener('click', (e) => {
+    if (menu.hidden) return;
+    if (e.target.closest('#settingsMenu') || e.target.closest('#settingsBtn')) return;
+    menu.hidden = true;
+  });
+
+  menu.addEventListener('click', async (e) => {
+    const item = e.target.closest('[data-settings-action]');
+    if (!item) return;
+    e.stopPropagation();
+    const action = item.dataset.settingsAction;
+    if (action === 'export') {
+      const { count } = await exportLibrary();
+      setSettingsStatus(`Exported ${count} paper${count === 1 ? '' : 's'}.`);
+    } else if (action === 'import') {
+      fileInput.click();
+    }
+  });
+
+  fileInput.addEventListener('change', async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    menu.hidden = false;
+    setSettingsStatus('Importing…');
+    const result = await importLibrary(file);
+    if (result.error) {
+      setSettingsStatus(result.error);
+    } else {
+      const parts = [`${result.added} new`, `${result.merged} merged`];
+      if (result.skipped) parts.push(`${result.skipped} skipped`);
+      setSettingsStatus('Imported: ' + parts.join(', '));
+      refreshSettingsInfo();
+    }
+  });
+}
+
 function init() {
   const greeting = document.getElementById('greeting');
   const date = document.getElementById('dateDisplay');
   if (greeting) greeting.textContent = getGreeting();
   if (date) date.textContent = getDateDisplay();
   renderLibrary();
+  initSettingsMenu();
 
   // Ask the service worker to scan all currently-open tabs and add any
   // papers we don't have yet. Storage.onChanged will trigger a re-render
