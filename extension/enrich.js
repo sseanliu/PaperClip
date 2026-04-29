@@ -152,74 +152,116 @@
     return out;
   }
 
-  // ─── Semantic Scholar (fallback for ieee/nature/nips/mlr/acl/s2/pdf) ──────
+  // ─── Semantic Scholar (universal — provides venue + cross-source IDs) ─────
+  //
+  // Returns externalIds like { DOI, ArXiv, ACL, MAG, ... } so the same paper
+  // visited via different URLs (arxiv abs vs CHI portal) can be deduped.
 
-  async function enrichSemanticScholar(paper) {
-    let identifier;
-    switch (paper.source) {
-      case 'semanticscholar':
-        identifier = paper.sourceId; // 40-char hash
-        break;
-      case 'ieee':
-        // Semantic Scholar doesn't accept IEEE doc IDs directly. Try URL lookup.
-        identifier = `URL:${paper.url}`;
-        break;
-      case 'nature':
-      case 'nips':
-      case 'mlr':
-      case 'acl':
-      case 'pdf':
-        identifier = `URL:${paper.url}`;
-        break;
-      default:
-        return null;
-    }
+  function s2IdentifierFor(paper) {
+    if (paper.source === 'arxiv' && paper.sourceId) return `arXiv:${paper.sourceId}`;
+    if (paper.doi) return `DOI:${paper.doi}`;
+    if (paper.source === 'semanticscholar' && paper.sourceId) return paper.sourceId;
+    if (paper.url) return `URL:${paper.url}`;
+    return null;
+  }
+
+  async function fetchS2(identifier) {
     if (!identifier) return null;
-
-    const url = `https://api.semanticscholar.org/graph/v1/paper/${encodeURIComponent(identifier)}?fields=title,authors,year,venue,abstract`;
+    const url = `https://api.semanticscholar.org/graph/v1/paper/${encodeURIComponent(identifier)}?fields=title,authors,year,venue,abstract,externalIds`;
     const r = await fetch(url);
-    if (r.status === 404) return null; // S2 doesn't know this paper — give up gracefully
+    if (r.status === 404) return null;
     if (!r.ok) throw new Error(`s2: HTTP ${r.status}`);
     const json = await r.json();
     if (!json || !json.title) return null;
 
-    const authors = Array.isArray(json.authors)
-      ? json.authors.map(a => cleanWhitespace(a && a.name)).filter(Boolean)
-      : [];
+    return {
+      title: cleanWhitespace(json.title),
+      authors: Array.isArray(json.authors)
+        ? json.authors.map(a => cleanWhitespace(a && a.name)).filter(Boolean)
+        : [],
+      year: json.year || null,
+      venue: json.venue ? cleanWhitespace(json.venue) : null,
+      abstract: json.abstract ? cleanWhitespace(json.abstract) : null,
+      externalIds: json.externalIds || null,
+    };
+  }
 
-    const out = { title: cleanWhitespace(json.title), authors };
-    if (json.year) out.year = json.year;
-    if (json.venue) out.venue = cleanWhitespace(json.venue);
-    if (json.abstract) out.abstract = cleanWhitespace(json.abstract);
-    return out;
+  // ─── Merging primary (source-specific) and supplement (S2) ────────────────
+  //
+  // Source-specific APIs (arXiv, OpenReview, Crossref) win on title, authors,
+  // and abstract — they're authoritative for their domain. S2 wins on venue
+  // (it knows where preprints got accepted) and is the only source for
+  // externalIds.
+
+  function pickMerged(primary, supplement) {
+    if (!primary && !supplement) return null;
+    if (!primary) return supplement;
+    if (!supplement) return primary;
+    return {
+      title: primary.title || supplement.title || null,
+      authors: (primary.authors && primary.authors.length)
+        ? primary.authors
+        : (supplement.authors || []),
+      year: primary.year || supplement.year || null,
+      venue: supplement.venue || primary.venue || null,
+      abstract: primary.abstract || supplement.abstract || null,
+      externalIds: supplement.externalIds || primary.externalIds || null,
+    };
   }
 
   // ─── Dispatch ─────────────────────────────────────────────────────────────
+  //
+  // Strategy: run the source-specific fetcher (when available) AND a S2
+  // lookup, then merge. Source-specific fetcher might throw or return null;
+  // S2 might too. As long as ONE returns data, we have something to show.
+  // If both fail with errors, propagate so the caller marks 'failed' and
+  // retries later. If both return null (i.e. 404s), return null for
+  // 'unsupported'.
 
   async function enrich(paper) {
     if (!paper) return null;
-    switch (paper.source) {
-      case 'arxiv':
-        return await enrichArxiv(paper);
-      case 'openreview':
-        return await enrichOpenReview(paper);
-      case 'biorxiv':
-      case 'medrxiv':
-      case 'acm':
-      case 'springer':
-      case 'science':
-        return await enrichCrossref(paper);
-      case 'ieee':
-      case 'nature':
-      case 'nips':
-      case 'mlr':
-      case 'acl':
-      case 'semanticscholar':
-      case 'pdf':
-        return await enrichSemanticScholar(paper);
-      default:
-        return null;
+
+    let primary = null;
+    let primaryError = null;
+
+    try {
+      switch (paper.source) {
+        case 'arxiv':
+          primary = await enrichArxiv(paper);
+          break;
+        case 'openreview':
+          primary = await enrichOpenReview(paper);
+          break;
+        case 'biorxiv':
+        case 'medrxiv':
+        case 'acm':
+        case 'springer':
+        case 'science':
+          primary = await enrichCrossref(paper);
+          break;
+      }
+    } catch (err) {
+      primaryError = err;
+      console.warn('[paperclip] primary enrichment failed', paper.id, err);
     }
+
+    let supplement = null;
+    let supplementError = null;
+
+    try {
+      const identifier = s2IdentifierFor(paper);
+      if (identifier) supplement = await fetchS2(identifier);
+    } catch (err) {
+      supplementError = err;
+      console.warn('[paperclip] S2 supplement failed', paper.id, err);
+    }
+
+    if (!primary && !supplement) {
+      if (primaryError || supplementError) throw primaryError || supplementError;
+      return null;
+    }
+
+    return pickMerged(primary, supplement);
   }
 
   self.PaperEnrich = { enrich };

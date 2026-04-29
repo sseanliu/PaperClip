@@ -211,6 +211,10 @@ async function backfillExistingTabs() {
 
 const ENRICH_THROTTLE_MS = 900;
 
+// Bumped whenever the enrichment schema or behavior changes meaningfully.
+// retryStuckEnrichments() re-runs anything below the current version.
+const ENRICHMENT_VERSION = 2;
+
 const enrichQueued = new Set();
 let enrichChain = Promise.resolve();
 
@@ -234,7 +238,11 @@ async function runEnrichmentOnce(canonicalId) {
   const papers = store[PAPERS_KEY] || {};
   const paper = papers[canonicalId];
   if (!paper) return;
-  if (paper.enrichmentStatus === 'ok' || paper.enrichmentStatus === 'unsupported') return;
+
+  const isCurrent = (paper.enrichmentVersion || 0) >= ENRICHMENT_VERSION;
+  if ((paper.enrichmentStatus === 'ok' || paper.enrichmentStatus === 'unsupported') && isCurrent) {
+    return;
+  }
 
   let patches = null;
   try {
@@ -243,6 +251,7 @@ async function runEnrichmentOnce(canonicalId) {
     console.warn('[paperclip] enrich error', canonicalId, err);
     paper.enrichmentStatus = 'failed';
     paper.enrichedAt = new Date().toISOString();
+    paper.enrichmentVersion = ENRICHMENT_VERSION;
     await chrome.storage.local.set({ [PAPERS_KEY]: papers });
     return;
   }
@@ -250,6 +259,7 @@ async function runEnrichmentOnce(canonicalId) {
   if (patches == null) {
     paper.enrichmentStatus = 'unsupported';
     paper.enrichedAt = new Date().toISOString();
+    paper.enrichmentVersion = ENRICHMENT_VERSION;
     await chrome.storage.local.set({ [PAPERS_KEY]: papers });
     return;
   }
@@ -259,26 +269,128 @@ async function runEnrichmentOnce(canonicalId) {
   if (patches.year != null) paper.year = patches.year;
   if (patches.venue) paper.venue = patches.venue;
   if (patches.abstract) paper.abstract = patches.abstract;
+  if (patches.externalIds) paper.externalIds = patches.externalIds;
   paper.enrichmentStatus = 'ok';
   paper.enrichedAt = new Date().toISOString();
+  paper.enrichmentVersion = ENRICHMENT_VERSION;
+
+  // Now that we know this paper's external IDs (DOI / ArXiv / etc.), check
+  // whether any other entry in the library is the same paper under a
+  // different canonical ID — same paper visited via arxiv URL and via the
+  // CHI portal, for example. If so, merge them.
+  dedupeAcrossExternalIds(papers, canonicalId);
 
   await chrome.storage.local.set({ [PAPERS_KEY]: papers });
 }
 
 /**
- * Find any papers that are stuck in 'pending' or 'failed' state and re-queue
- * them. Called after backfill, on browser startup, and on extension install
- * so transient errors (rate limits, dropped connections, worker death) get
- * picked up the next time the user does anything.
+ * Find any papers that need enrichment and re-queue them. Includes:
+ *   - 'pending' or 'failed' status (never finished or transient error)
+ *   - 'ok' but enrichmentVersion is below the current code (schema upgrade)
+ * Called after backfill, on browser startup, and on extension install.
  */
 async function retryStuckEnrichments() {
   const store = await chrome.storage.local.get(PAPERS_KEY);
   const papers = store[PAPERS_KEY] || {};
   for (const p of Object.values(papers)) {
-    if (p.enrichmentStatus === 'pending' || p.enrichmentStatus === 'failed') {
+    const isCurrent = (p.enrichmentVersion || 0) >= ENRICHMENT_VERSION;
+    if (
+      p.enrichmentStatus === 'pending' ||
+      p.enrichmentStatus === 'failed' ||
+      !isCurrent
+    ) {
       scheduleEnrichment(p.id);
     }
   }
+}
+
+// ─── Cross-source duplicate detection ─────────────────────────────────────────
+//
+// Same paper opened from multiple sources (arxiv pre-print + ACM camera-ready)
+// gets stored under different canonical IDs. After enrichment fills in the
+// externalIds field via Semantic Scholar, we can detect these duplicates by
+// matching shared DOIs / arXiv IDs and merge them.
+
+function externalIdSet(paper) {
+  const ids = new Set();
+  if (typeof paper.id === 'string') {
+    if (paper.id.startsWith('arxiv:')) {
+      ids.add(`arxiv:${paper.id.slice(6).toLowerCase().replace(/v\d+$/, '')}`);
+    } else if (paper.id.startsWith('doi:')) {
+      ids.add(`doi:${paper.id.slice(4).toLowerCase()}`);
+    }
+  }
+  if (paper.doi) ids.add(`doi:${String(paper.doi).toLowerCase()}`);
+  const ext = paper.externalIds || {};
+  if (ext.DOI) ids.add(`doi:${String(ext.DOI).toLowerCase()}`);
+  if (ext.ArXiv) ids.add(`arxiv:${String(ext.ArXiv).toLowerCase().replace(/v\d+$/, '')}`);
+  return ids;
+}
+
+function papersAreDuplicates(a, b) {
+  if (a.id === b.id) return false;
+  const aIds = externalIdSet(a);
+  if (aIds.size === 0) return false;
+  for (const id of externalIdSet(b)) {
+    if (aIds.has(id)) return true;
+  }
+  return false;
+}
+
+function mergePapers(primary, secondary) {
+  if (!primary.firstSeenAt || (secondary.firstSeenAt && secondary.firstSeenAt < primary.firstSeenAt)) {
+    primary.firstSeenAt = secondary.firstSeenAt;
+  }
+  if (!primary.lastSeenAt || (secondary.lastSeenAt && secondary.lastSeenAt > primary.lastSeenAt)) {
+    primary.lastSeenAt = secondary.lastSeenAt;
+  }
+  primary.visitCount = (primary.visitCount || 0) + (secondary.visitCount || 0);
+
+  if (!primary.title && secondary.title) primary.title = secondary.title;
+  if (!primary.year && secondary.year) primary.year = secondary.year;
+  if (!primary.venue && secondary.venue) primary.venue = secondary.venue;
+  if (!primary.abstract && secondary.abstract) primary.abstract = secondary.abstract;
+  if ((!primary.authors || primary.authors.length === 0) && Array.isArray(secondary.authors) && secondary.authors.length) {
+    primary.authors = secondary.authors;
+  }
+  if (!primary.doi && secondary.doi) primary.doi = secondary.doi;
+
+  // externalIds union, primary wins on conflicts
+  primary.externalIds = { ...(secondary.externalIds || {}), ...(primary.externalIds || {}) };
+
+  // Track aliases so we know which canonical IDs got folded in here.
+  const aliases = new Set(primary.aliases || []);
+  aliases.add(secondary.id);
+  if (Array.isArray(secondary.aliases)) {
+    for (const a of secondary.aliases) aliases.add(a);
+  }
+  primary.aliases = [...aliases];
+
+  if (secondary.readStatus === 'read') primary.readStatus = 'read';
+}
+
+function dedupeAcrossExternalIds(papers, paperId) {
+  const target = papers[paperId];
+  if (!target) return false;
+
+  const matches = [];
+  for (const p of Object.values(papers)) {
+    if (p.id === paperId) continue;
+    if (papersAreDuplicates(target, p)) matches.push(p);
+  }
+  if (matches.length === 0) return false;
+
+  // Pick primary as the entry with the earliest firstSeenAt — keeps the
+  // user's library order stable.
+  const all = [target, ...matches];
+  all.sort((a, b) => (a.firstSeenAt || '').localeCompare(b.firstSeenAt || ''));
+  const primary = all[0];
+
+  for (const s of all.slice(1)) {
+    mergePapers(primary, s);
+    delete papers[s.id];
+  }
+  return true;
 }
 
 // ─── Event listeners ──────────────────────────────────────────────────────────
