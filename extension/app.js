@@ -531,10 +531,25 @@ document.addEventListener('click', async (e) => {
   const actionBtn = e.target.closest('[data-action]');
   if (actionBtn) {
     const action = actionBtn.dataset.action;
-    const row = actionBtn.closest('.paper-row');
-    if (!row) return;
     e.stopPropagation();
     e.preventDefault();
+
+    // remove-attachment lives in .paper-detail (sibling of .paper-row) and
+    // carries its own paperId on the button, so it doesn't need a row
+    // ancestor — handle it before the row check below.
+    if (action === 'remove-attachment') {
+      const paperId = actionBtn.dataset.paperId;
+      const attachUrl = actionBtn.dataset.attachmentUrl;
+      if (paperId && attachUrl) {
+        await patchPaper(paperId, paper => {
+          paper.attachments = (paper.attachments || []).filter(a => a.url !== attachUrl);
+        });
+      }
+      return;
+    }
+
+    const row = actionBtn.closest('.paper-row');
+    if (!row) return;
 
     if (action === 'toggle-star') {
       await patchPaper(row.dataset.id, paper => {
@@ -574,15 +589,6 @@ document.addEventListener('click', async (e) => {
     }
     if (action === 'delete') {
       await deletePaper(row.dataset.id);
-      return;
-    }
-    if (action === 'remove-attachment') {
-      const paperId = actionBtn.dataset.paperId;
-      const attachUrl = actionBtn.dataset.attachmentUrl;
-      if (!paperId || !attachUrl) return;
-      await patchPaper(paperId, paper => {
-        paper.attachments = (paper.attachments || []).filter(a => a.url !== attachUrl);
-      });
       return;
     }
   }
