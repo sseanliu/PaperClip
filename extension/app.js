@@ -386,31 +386,37 @@ document.addEventListener('click', async (e) => {
   renderLibrary(search ? search.value : '');
 });
 
-let searchDebounce;
+// Coalesce rapid re-render triggers (storage writes during enrichment, tab
+// events firing for every URL/status/title change) into a single render so
+// expanded rows don't visibly flash from constant DOM rebuilds.
+let renderTimer = null;
+function scheduleRender(delay = 200) {
+  clearTimeout(renderTimer);
+  renderTimer = setTimeout(() => {
+    const search = document.getElementById('paperSearch');
+    renderLibrary(search ? search.value : '');
+  }, delay);
+}
+
 document.addEventListener('input', (e) => {
   if (e.target && e.target.id === 'paperSearch') {
-    clearTimeout(searchDebounce);
-    searchDebounce = setTimeout(() => renderLibrary(e.target.value), 100);
+    scheduleRender(80);
   }
 });
 
 // Re-render whenever the service worker writes new papers / enrichment.
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local' || !changes[PAPERS_KEY]) return;
-  const search = document.getElementById('paperSearch');
-  renderLibrary(search ? search.value : '');
+  scheduleRender(150);
 });
 
 // Re-render on tab open/close so the open-status dots stay accurate.
 if (chrome.tabs && chrome.tabs.onCreated && chrome.tabs.onRemoved) {
-  const refreshOpenState = () => {
-    const search = document.getElementById('paperSearch');
-    renderLibrary(search ? search.value : '');
-  };
-  chrome.tabs.onCreated.addListener(refreshOpenState);
-  chrome.tabs.onRemoved.addListener(refreshOpenState);
+  const refresh = () => scheduleRender(250);
+  chrome.tabs.onCreated.addListener(refresh);
+  chrome.tabs.onRemoved.addListener(refresh);
   chrome.tabs.onUpdated.addListener((_, changeInfo) => {
-    if (changeInfo.status === 'complete' || changeInfo.url) refreshOpenState();
+    if (changeInfo.status === 'complete' || changeInfo.url) refresh();
   });
 }
 

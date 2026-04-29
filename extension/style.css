@@ -339,12 +339,6 @@ header {
   font-size: 13px;
   color: var(--ink);
   line-height: 1.55;
-  animation: paper-detail-enter 0.18s ease both;
-}
-
-@keyframes paper-detail-enter {
-  from { opacity: 0; transform: translateY(-2px); }
-  to   { opacity: 1; transform: none; }
 }
 
 .paper-detail-row {
