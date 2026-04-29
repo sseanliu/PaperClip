@@ -133,12 +133,11 @@ function paperMatchesFilter(p, q) {
   return hay.includes(q);
 }
 
-function sortPapers(list, openMap) {
+function sortPapers(list) {
+  // Sort purely by when the paper was first added to the library — newest at
+  // top. Open-tab status doesn't affect order; revisits don't either.
   return list.slice().sort((a, b) => {
-    const ao = openMap.has(a.id) ? 1 : 0;
-    const bo = openMap.has(b.id) ? 1 : 0;
-    if (ao !== bo) return bo - ao;
-    return (b.lastSeenAt || '').localeCompare(a.lastSeenAt || '');
+    return (b.firstSeenAt || '').localeCompare(a.firstSeenAt || '');
   });
 }
 
@@ -237,7 +236,7 @@ async function renderLibrary(filter = '') {
 
   const q = filter.trim().toLowerCase();
   const filtered = q ? all.filter(p => paperMatchesFilter(p, q)) : all;
-  const sorted = sortPapers(filtered, openMap);
+  const sorted = sortPapers(filtered);
 
   if (all.length === 0) {
     list.innerHTML = '';
