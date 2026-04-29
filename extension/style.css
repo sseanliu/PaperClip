@@ -146,7 +146,7 @@ header {
 .paper-list-header,
 .paper-row {
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) minmax(0, 0.7fr) 56px auto;
+  grid-template-columns: 16px minmax(0, 1fr) minmax(0, 0.7fr) 56px 92px;
   gap: 16px;
   align-items: center;
 }
