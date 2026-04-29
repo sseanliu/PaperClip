@@ -289,6 +289,15 @@ function renderRow(p, openMap) {
             <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
           </svg>
         </button>
+        <button class="paper-icon-btn paper-copy-btn"
+                data-action="copy-single"
+                title="Copy this paper's data"
+                aria-label="Copy this paper's data">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <rect x="9" y="9" width="13" height="13" rx="2"/>
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+          </svg>
+        </button>
         <button class="paper-icon-btn paper-delete-btn"
                 data-action="delete"
                 title="Remove from library"
@@ -524,6 +533,18 @@ document.addEventListener('click', async (e) => {
       await patchPaper(row.dataset.id, paper => {
         paper.starred = !paper.starred;
       });
+      return;
+    }
+    if (action === 'copy-single') {
+      const store = await chrome.storage.local.get(PAPERS_KEY);
+      const papers = store[PAPERS_KEY] || {};
+      const paper = papers[row.dataset.id];
+      if (!paper) return;
+      try {
+        await navigator.clipboard.writeText(formatPaperForCopy(paper));
+      } catch (err) {
+        console.warn('[paperclip] copy failed', err);
+      }
       return;
     }
     if (action === 'toggle-select') {
