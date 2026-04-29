@@ -62,6 +62,7 @@
     <input type="file" id="importFile" accept="application/json,.json" hidden>
 
     <div class="paper-list-header" id="paperListHeader">
+      <div></div>
       <div class="paper-col-label">Title</div>
       <div class="paper-col-label">Authors</div>
       <div class="paper-col-label">Year</div>
@@ -90,6 +91,13 @@
     </div>
   </footer>
 
+</div>
+
+<div class="selection-bar" id="selectionBar" hidden>
+  <span class="selection-count" id="selectionCount">0 selected</span>
+  <button class="selection-btn" data-selection-action="copy" id="selectionCopyBtn">Copy</button>
+  <button class="selection-btn" data-selection-action="delete">Delete</button>
+  <button class="selection-btn selection-btn-quiet" data-selection-action="clear">Cancel</button>
 </div>
 
 <!-- URL classifier — must load before app.js -->

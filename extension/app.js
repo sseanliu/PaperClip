@@ -147,6 +147,7 @@ function sortPapers(list) {
 // ─── Expanded-row state ──────────────────────────────────────────────────────
 
 const expandedIds = new Set();
+const selectedIds = new Set();
 
 function renderDetail(p) {
   const fullAuthors = (p.authors || []).filter(Boolean).join(', ');
@@ -251,17 +252,28 @@ function renderRow(p, openMap) {
 
   const isExpanded = expandedIds.has(p.id);
   const isStarred = !!p.starred;
+  const isSelected = selectedIds.has(p.id);
 
   const classes = ['paper-row'];
   if (isOpen) classes.push('is-open');
   if (isExpanded) classes.push('is-expanded');
   if (isStarred) classes.push('is-starred');
+  if (isSelected) classes.push('is-selected');
 
   return `
     <div class="${classes.join(' ')}"
          data-id="${escapeHtml(p.id)}"
          data-url="${escapeHtml(p.url)}"
          ${open ? `data-tab-id="${open.id}" data-window-id="${open.windowId}"` : ''}>
+      <button class="paper-select-checkbox"
+              data-action="toggle-select"
+              title="${isSelected ? 'Deselect' : 'Select'}"
+              aria-label="${isSelected ? 'Deselect' : 'Select'}"
+              aria-pressed="${isSelected}">
+        <svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20 6 9 17l-5-5"/>
+        </svg>
+      </button>
       <div class="paper-main">
         <div class="paper-title"><span class="paper-title-text">${escapeHtml(title)}</span></div>
         <div class="paper-sub">${subParts.join(' · ')}</div>
@@ -333,6 +345,136 @@ async function renderLibrary(filter = '') {
     ? `${sorted.length} of ${all.length}`
     : `${all.length} paper${all.length === 1 ? '' : 's'}`;
   list.innerHTML = sorted.map(p => renderRow(p, openMap)).join('');
+
+  // Drop selections that no longer exist (e.g. after delete)
+  const valid = new Set(all.map(p => p.id));
+  for (const id of [...selectedIds]) {
+    if (!valid.has(id)) selectedIds.delete(id);
+  }
+  updateSelectionBar();
+}
+
+// ─── Multi-select action bar ──────────────────────────────────────────────────
+
+function updateSelectionBar() {
+  const bar = document.getElementById('selectionBar');
+  const countEl = document.getElementById('selectionCount');
+  if (!bar) return;
+  if (selectedIds.size === 0) {
+    bar.hidden = true;
+    return;
+  }
+  bar.hidden = false;
+  countEl.textContent = `${selectedIds.size} selected`;
+}
+
+function formatPaperForCopy(p) {
+  const lines = [];
+  lines.push(p.title || p.id);
+  if (Array.isArray(p.authors) && p.authors.length) lines.push(p.authors.join(', '));
+  const meta = [
+    p.year ? String(p.year) : null,
+    p.venue || null,
+    SOURCE_LABELS[p.source] || p.source || null,
+  ].filter(Boolean).join(' · ');
+  if (meta) lines.push(meta);
+  if (p.url) lines.push(p.url);
+  if (p.abstract) {
+    lines.push('');
+    lines.push(p.abstract);
+  }
+  if (Array.isArray(p.attachments) && p.attachments.length) {
+    lines.push('');
+    lines.push('Linked URLs:');
+    for (const a of p.attachments) {
+      if (!a || !a.url) continue;
+      lines.push(`- ${a.title || a.url}\n  ${a.url}`);
+    }
+  }
+  return lines.join('\n');
+}
+
+async function copySelectedToClipboard() {
+  const store = await chrome.storage.local.get(PAPERS_KEY);
+  const papers = store[PAPERS_KEY] || {};
+  const selected = [...selectedIds].map(id => papers[id]).filter(Boolean);
+  if (!selected.length) return 0;
+  // Sort selected the same way the list is sorted (consistent paste order)
+  const sorted = sortPapers(selected);
+  const text = sorted.map(formatPaperForCopy).join('\n\n---\n\n');
+  await navigator.clipboard.writeText(text);
+  return selected.length;
+}
+
+async function deleteSelected() {
+  if (selectedIds.size === 0) return;
+  const ok = confirm(`Delete ${selectedIds.size} paper${selectedIds.size === 1 ? '' : 's'}? Open tabs for them will also be closed.`);
+  if (!ok) return;
+
+  const ids = [...selectedIds];
+  const store = await chrome.storage.local.get(PAPERS_KEY);
+  const papers = store[PAPERS_KEY] || {};
+
+  // Build the set of canonical IDs (incl. aliases) whose tabs we should close.
+  const canonicalsToClose = new Set();
+  for (const id of ids) {
+    const p = papers[id];
+    if (!p) continue;
+    canonicalsToClose.add(id);
+    if (Array.isArray(p.aliases)) for (const a of p.aliases) canonicalsToClose.add(a);
+  }
+
+  try {
+    const tabs = await chrome.tabs.query({});
+    const tabIdsToClose = [];
+    for (const t of tabs) {
+      if (!t.url || t.id == null) continue;
+      const cls = classifyPaper(t.url);
+      if (cls && canonicalsToClose.has(cls.canonicalId)) tabIdsToClose.push(t.id);
+    }
+    if (tabIdsToClose.length) await chrome.tabs.remove(tabIdsToClose);
+  } catch (err) {
+    console.warn('[paperclip] could not close tabs for selected', err);
+  }
+
+  for (const id of ids) delete papers[id];
+  await chrome.storage.local.set({ [PAPERS_KEY]: papers });
+
+  selectedIds.clear();
+}
+
+function clearSelection() {
+  if (selectedIds.size === 0) return;
+  selectedIds.clear();
+  const search = document.getElementById('paperSearch');
+  renderLibrary(search ? search.value : '');
+}
+
+function initSelectionBar() {
+  const bar = document.getElementById('selectionBar');
+  if (!bar) return;
+  bar.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-selection-action]');
+    if (!btn) return;
+    e.stopPropagation();
+    const action = btn.dataset.selectionAction;
+
+    if (action === 'copy') {
+      const n = await copySelectedToClipboard();
+      const original = btn.textContent;
+      btn.textContent = `Copied ${n}`;
+      setTimeout(() => { btn.textContent = original; }, 1500);
+      return;
+    }
+    if (action === 'delete') {
+      await deleteSelected();
+      return;
+    }
+    if (action === 'clear') {
+      clearSelection();
+      return;
+    }
+  });
 }
 
 // ─── Event wiring ─────────────────────────────────────────────────────────────
@@ -384,6 +526,14 @@ document.addEventListener('click', async (e) => {
       await patchPaper(row.dataset.id, paper => {
         paper.starred = !paper.starred;
       });
+      return;
+    }
+    if (action === 'toggle-select') {
+      const id = row.dataset.id;
+      if (selectedIds.has(id)) selectedIds.delete(id);
+      else selectedIds.add(id);
+      const search = document.getElementById('paperSearch');
+      renderLibrary(search ? search.value : '');
       return;
     }
     if (action === 'delete') {
@@ -665,6 +815,7 @@ function init() {
   if (date) date.textContent = getDateDisplay();
   renderLibrary();
   initSettingsMenu();
+  initSelectionBar();
 
   // Ask the service worker to scan all currently-open tabs and add any
   // papers we don't have yet. Storage.onChanged will trigger a re-render

@@ -227,12 +227,12 @@ header {
   font-weight: 500;
 }
 
-/* ---- Table layout: title+sub | authors | year | actions ---- */
+/* ---- Table layout: select | title+sub | authors | year | actions ---- */
 .paper-list-header,
 .paper-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 0.7fr) 56px 62px;
-  gap: 16px;
+  grid-template-columns: 18px minmax(0, 1fr) minmax(0, 0.7fr) 56px 62px;
+  gap: 14px;
   align-items: center;
 }
 
@@ -266,6 +266,43 @@ header {
 
 .paper-row:hover {
   background: rgba(255, 253, 249, 0.7);
+}
+
+/* ---- Multi-select checkbox ---- */
+.paper-select-checkbox {
+  width: 16px;
+  height: 16px;
+  margin-top: 6px;
+  padding: 0;
+  border: 1.5px solid var(--warm-gray);
+  border-radius: 3px;
+  background: transparent;
+  color: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s, background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.paper-row:hover .paper-select-checkbox,
+.paper-row.is-selected .paper-select-checkbox {
+  opacity: 1;
+}
+
+.paper-select-checkbox:hover {
+  border-color: var(--muted);
+}
+
+.paper-row.is-selected {
+  background: rgba(200, 113, 58, 0.06);
+}
+
+.paper-row.is-selected .paper-select-checkbox {
+  background: var(--accent-amber);
+  border-color: var(--accent-amber);
+  color: var(--paper);
 }
 
 .paper-main {
@@ -550,6 +587,59 @@ header {
   color: var(--muted);
   max-width: 380px;
   line-height: 1.5;
+}
+
+/* ---- Selection action bar (floats at bottom when rows are selected) ---- */
+.selection-bar {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px 6px 18px;
+  background: var(--ink);
+  color: var(--paper);
+  border-radius: 14px;
+  box-shadow: 0 12px 36px rgba(26, 22, 19, 0.28);
+  z-index: 200;
+  font-size: 13px;
+  font-family: 'DM Sans', sans-serif;
+}
+
+.selection-bar[hidden] { display: none; }
+
+.selection-count {
+  margin-right: 10px;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+}
+
+.selection-btn {
+  padding: 6px 12px;
+  border: none;
+  background: rgba(255, 253, 249, 0.12);
+  color: var(--paper);
+  border-radius: 9px;
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.12s;
+}
+
+.selection-btn:hover {
+  background: rgba(255, 253, 249, 0.22);
+}
+
+.selection-btn-quiet {
+  background: transparent;
+  color: rgba(248, 245, 240, 0.7);
+}
+
+.selection-btn-quiet:hover {
+  background: rgba(255, 253, 249, 0.08);
+  color: var(--paper);
 }
 
 /* ---- Footer ---- */
