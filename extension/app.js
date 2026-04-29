@@ -228,7 +228,6 @@ function renderRow(p, openMap) {
          data-id="${escapeHtml(p.id)}"
          data-url="${escapeHtml(p.url)}"
          ${open ? `data-tab-id="${open.id}" data-window-id="${open.windowId}"` : ''}>
-      <div class="paper-dot" aria-hidden="true"></div>
       <div class="paper-main">
         <div class="paper-title">${escapeHtml(title)}</div>
         <div class="paper-sub">${subParts.join(' · ')}</div>

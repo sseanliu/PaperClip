@@ -142,11 +142,11 @@ header {
   box-shadow: 0 0 0 3px rgba(90, 122, 98, 0.12);
 }
 
-/* ---- Table layout: dot | title+sub | authors | year | actions ---- */
+/* ---- Table layout: title+sub | authors | year | actions ---- */
 .paper-list-header,
 .paper-row {
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) minmax(0, 0.7fr) 56px 92px;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.7fr) 56px 92px;
   gap: 16px;
   align-items: center;
 }
@@ -181,22 +181,6 @@ header {
 
 .paper-row:hover {
   background: rgba(255, 253, 249, 0.7);
-}
-
-.paper-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  border: 1.5px solid var(--muted);
-  background: transparent;
-  margin-top: 7px;
-  transition: background 0.2s, border-color 0.2s;
-}
-
-.paper-row.is-open .paper-dot {
-  background: var(--status-active);
-  border-color: var(--status-active);
-  box-shadow: 0 0 0 3px rgba(61, 122, 74, 0.15);
 }
 
 .paper-main {
@@ -333,7 +317,7 @@ header {
 
 /* ---- Detail panel (abstract drawer) ---- */
 .paper-detail {
-  padding: 14px 24px 20px 44px;
+  padding: 14px 24px 20px 12px;
   border-bottom: 1px solid var(--warm-gray);
   background: rgba(232, 226, 218, 0.18);
   font-size: 13px;
