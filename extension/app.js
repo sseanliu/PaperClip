@@ -460,15 +460,8 @@ function initSelectionBar() {
     const action = btn.dataset.selectionAction;
 
     if (action === 'copy') {
-      const n = await copySelectedToClipboard();
-      const original = btn.textContent;
-      btn.textContent = `Copied ${n}`;
-      // Show feedback briefly, then drop the selection so the bar slides
-      // away and the user can move on.
-      setTimeout(() => {
-        btn.textContent = original;
-        clearSelection();
-      }, 900);
+      await copySelectedToClipboard();
+      clearSelection();
       return;
     }
     if (action === 'delete') {
