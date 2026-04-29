@@ -159,6 +159,36 @@ function renderDetail(p) {
     abstractHtml = '<div class="paper-detail-empty">No abstract available.</div>';
   }
 
+  const attachments = Array.isArray(p.attachments) ? p.attachments.slice() : [];
+  attachments.sort((a, b) => (b.addedAt || '').localeCompare(a.addedAt || ''));
+
+  const attachmentsHtml = attachments.length ? `
+    <div class="paper-detail-row paper-detail-row-block">
+      <span class="paper-detail-label">Linked tabs</span>
+      <ul class="paper-attachment-list">
+        ${attachments.map(a => `
+          <li class="paper-attachment-item">
+            <a class="paper-attachment-link"
+               href="${escapeHtml(a.url)}"
+               target="_blank"
+               rel="noopener"
+               title="${escapeHtml(a.url)}">${escapeHtml(a.title || a.url)}</a>
+            <button class="paper-attachment-remove"
+                    data-action="remove-attachment"
+                    data-paper-id="${escapeHtml(p.id)}"
+                    data-attachment-url="${escapeHtml(a.url)}"
+                    title="Remove this link"
+                    aria-label="Remove this link">
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M6 18 18 6M6 6l12 12"/>
+              </svg>
+            </button>
+          </li>
+        `).join('')}
+      </ul>
+    </div>
+  ` : '';
+
   return `
     <div class="paper-detail" data-detail-for="${escapeHtml(p.id)}">
       ${fullAuthors ? `
@@ -175,6 +205,7 @@ function renderDetail(p) {
         <span class="paper-detail-label">Abstract</span>
         ${abstractHtml}
       </div>
+      ${attachmentsHtml}
       <div class="paper-detail-row paper-detail-row-block">
         <a class="paper-detail-link" href="${escapeHtml(p.url)}" target="_blank" rel="noopener">${escapeHtml(p.url)}</a>
       </div>
@@ -361,6 +392,15 @@ document.addEventListener('click', async (e) => {
     }
     if (action === 'delete') {
       await deletePaper(row.dataset.id);
+      return;
+    }
+    if (action === 'remove-attachment') {
+      const paperId = actionBtn.dataset.paperId;
+      const attachUrl = actionBtn.dataset.attachmentUrl;
+      if (!paperId || !attachUrl) return;
+      await patchPaper(paperId, paper => {
+        paper.attachments = (paper.attachments || []).filter(a => a.url !== attachUrl);
+      });
       return;
     }
   }
