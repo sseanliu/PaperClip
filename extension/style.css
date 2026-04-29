@@ -36,9 +36,9 @@ body::before {
 .container {
   position: relative;
   z-index: 1;
-  max-width: 960px;
+  max-width: 1400px;
   margin: 0 auto;
-  padding: 48px 32px 80px;
+  padding: 48px 48px 80px;
 }
 
 /* ---- Header ---- */
