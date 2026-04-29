@@ -1,46 +1,19 @@
-# Tab Out
+# PaperClip
 
-**Keep tabs on your tabs.**
+**Every paper you've ever opened, in one library.**
 
-Tab Out is a Chrome extension that replaces your new tab page with a dashboard of everything you have open. Tabs are grouped by domain, with homepages (Gmail, X, LinkedIn, etc.) pulled into their own group. Close tabs with a satisfying swoosh + confetti.
+PaperClip is a Chrome extension that turns your new tab page into a Zotero-style library of every academic paper you've encountered. It auto-captures papers as you browse, persists them permanently, and enriches each entry with title, authors, year, and venue from public APIs.
 
-No server. No account. No external API calls. Just a Chrome extension.
-
----
-
-## Install with a coding agent
-
-Send your coding agent (Claude Code, Codex, etc.) this repo and say **"install this"**:
-
-```
-https://github.com/zarazhangrui/tab-out
-```
-
-The agent will walk you through it. Takes about 1 minute.
+No server. No account. No data leaves your machine — except the small lookup requests to arXiv / OpenReview / Crossref / Semantic Scholar to fetch metadata.
 
 ---
 
-## Features
-
-- **See all your tabs at a glance** on a clean grid, grouped by domain
-- **Homepages group** pulls Gmail inbox, X home, YouTube, LinkedIn, GitHub homepages into one card
-- **Close tabs with style** with swoosh sound + confetti burst
-- **Duplicate detection** flags when you have the same page open twice, with one-click cleanup
-- **Click any tab to jump to it** across windows, no new tab opened
-- **Save for later** bookmark tabs to a checklist before closing them
-- **Localhost grouping** shows port numbers next to each tab so you can tell your vibe coding projects apart
-- **Expandable groups** show the first 8 tabs with a clickable "+N more"
-- **100% local** your data never leaves your machine
-- **Pure Chrome extension** no server, no Node.js, no npm, no setup beyond loading the extension
-
----
-
-## Manual Setup
+## Install
 
 **1. Clone the repo**
 
 ```bash
-git clone https://github.com/zarazhangrui/tab-out.git
+git clone https://github.com/sseanliu/PaperClip.git
 ```
 
 **2. Load the Chrome extension**
@@ -48,26 +21,39 @@ git clone https://github.com/zarazhangrui/tab-out.git
 1. Open Chrome and go to `chrome://extensions`
 2. Enable **Developer mode** (top-right toggle)
 3. Click **Load unpacked**
-4. Navigate to the `extension/` folder inside the cloned repo and select it
+4. Select the `extension/` folder inside the cloned repo
 
 **3. Open a new tab**
 
-You'll see Tab Out.
+You'll see your library — empty at first. Browse to any arXiv / OpenReview / etc. page, then open a new tab. The paper appears.
+
+---
+
+## Features
+
+- **Auto-capture** — visit a paper, it lands in your library. No clicks, no buttons.
+- **Permanent history** — papers stay even after you close the tab. Survives browser restarts.
+- **Metadata enrichment** — pulls title, authors, year, venue from public APIs (arXiv, OpenReview, Crossref, Semantic Scholar).
+- **Smart deduplication** — `arxiv.org/abs/X` and `arxiv.org/pdf/X.pdf` collapse into one entry.
+- **Open-tab indicator** — a green dot marks papers currently open in a tab; click the row to jump there.
+- **Search** — filter by title, author, or venue.
+- **Read / unread toggle** — mark papers as read so the unread queue stays scannable.
+- **Backfill** — already had paper tabs open before installing? They'll all show up on your next new-tab open.
+- **Sources supported** — arXiv, OpenReview, bioRxiv, medRxiv, ACM, IEEE, Springer, Nature, Science, NeurIPS proceedings, PMLR, ACL Anthology, Semantic Scholar, plus any URL ending in `.pdf`.
 
 ---
 
 ## How it works
 
 ```
-You open a new tab
-  -> Tab Out shows your open tabs grouped by domain
-  -> Homepages (Gmail, X, etc.) get their own group at the top
-  -> Click any tab title to jump to it
-  -> Close groups you're done with (swoosh + confetti)
-  -> Save tabs for later before closing them
+You browse to a paper URL
+  -> Service worker classifies it (arXiv, OpenReview, PDF, etc.)
+  -> Persists to chrome.storage.local with a canonical ID
+  -> Background queue fetches title/authors/year/venue from public APIs
+  -> Your library updates live (no refresh needed)
 ```
 
-Everything runs inside the Chrome extension. No external server, no API calls, no data sent anywhere. Saved tabs are stored in `chrome.storage.local`.
+Each paper is keyed by a canonical ID like `arxiv:2401.12345` so revisits and URL variants don't create duplicates.
 
 ---
 
@@ -77,15 +63,12 @@ Everything runs inside the Chrome extension. No external server, no API calls, n
 |------|-----|
 | Extension | Chrome Manifest V3 |
 | Storage | chrome.storage.local |
-| Sound | Web Audio API (synthesized, no files) |
-| Animations | CSS transitions + JS confetti particles |
+| Capture | Service worker listens to `chrome.tabs.onUpdated` |
+| Enrichment | arXiv API · OpenReview API · Crossref · Semantic Scholar |
+| UI | Vanilla HTML/CSS/JS — no framework |
 
 ---
 
 ## License
 
 MIT
-
----
-
-Built by [Zara](https://x.com/zarazhangrui)
