@@ -102,6 +102,20 @@ function fallbackTitle(rawTitle, cls) {
 const lastCapturedByTab = new Map();
 
 /**
+ * Look up an existing paper entry by canonical ID. If the direct key isn't
+ * present, also check whether any other entry has this ID in its aliases —
+ * which means this canonical ID was merged into a different primary record.
+ * Without this, every backfill scan after a merge re-creates the duplicate.
+ */
+function findExistingPaper(papers, canonicalId) {
+  if (papers[canonicalId]) return papers[canonicalId];
+  for (const p of Object.values(papers)) {
+    if (Array.isArray(p.aliases) && p.aliases.includes(canonicalId)) return p;
+  }
+  return null;
+}
+
+/**
  * Upsert a paper into storage.
  *
  * mode:
@@ -121,7 +135,7 @@ async function capturePaper(tab, mode = 'visit') {
   const now = new Date().toISOString();
   const store = await chrome.storage.local.get(PAPERS_KEY);
   const papers = store[PAPERS_KEY] || {};
-  const existing = papers[cls.canonicalId];
+  const existing = findExistingPaper(papers, cls.canonicalId);
 
   let didMutate = false;
 
@@ -173,9 +187,11 @@ async function capturePaper(tab, mode = 'visit') {
   await chrome.storage.local.set({ [PAPERS_KEY]: papers });
 
   // Kick off metadata enrichment for new entries (or retry if previously failed).
-  const paper = papers[cls.canonicalId];
-  if (paper.enrichmentStatus !== 'ok' && paper.enrichmentStatus !== 'unsupported') {
-    scheduleEnrichment(cls.canonicalId);
+  // Use the stored entry's id, which may differ from cls.canonicalId when this
+  // URL points to a merged record under a different primary key.
+  const paper = existing || papers[cls.canonicalId];
+  if (paper && paper.enrichmentStatus !== 'ok' && paper.enrichmentStatus !== 'unsupported') {
+    scheduleEnrichment(paper.id);
   }
 }
 
@@ -192,7 +208,10 @@ async function backfillExistingTabs() {
       const cls = classifyPaper(t.url);
       if (!cls) continue;
       const before = (await chrome.storage.local.get(PAPERS_KEY))[PAPERS_KEY] || {};
-      if (before[cls.canonicalId]) continue;
+      // Skip if this canonical ID already exists OR is in another paper's
+      // aliases (merged duplicate). Otherwise we'd recreate the dupe each
+      // time the new-tab page opens.
+      if (findExistingPaper(before, cls.canonicalId)) continue;
       await capturePaper(t, 'discover');
       added += 1;
     }
