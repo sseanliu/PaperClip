@@ -236,7 +236,7 @@ header {
 .paper-col-year {
   font-size: 13px;
   color: var(--muted);
-  text-align: right;
+  text-align: left;
   font-variant-numeric: tabular-nums;
   margin-top: 1px;
 }
