@@ -108,6 +108,69 @@ async function getPapers() {
   return store[PAPERS_KEY] || {};
 }
 
+async function getTags() {
+  const store = await chrome.storage.local.get(TAGS_KEY);
+  return store[TAGS_KEY] || {};
+}
+
+async function saveTags(tags) {
+  await chrome.storage.local.set({ [TAGS_KEY]: tags });
+}
+
+function genTagId() {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID().slice(0, 8);
+  }
+  return Math.random().toString(36).slice(2, 10);
+}
+
+async function createTag(rawName) {
+  const name = (rawName || '').trim();
+  if (!name) return null;
+  const tags = await getTags();
+  // Avoid creating an exact-name duplicate; reuse the existing one's id.
+  const existing = Object.values(tags).find(
+    t => t.name.toLowerCase() === name.toLowerCase()
+  );
+  if (existing) return existing.id;
+  const id = genTagId();
+  tags[id] = { id, name, createdAt: new Date().toISOString() };
+  await saveTags(tags);
+  return id;
+}
+
+async function renameTagById(id, rawName) {
+  const name = (rawName || '').trim();
+  if (!name) return;
+  const tags = await getTags();
+  if (!tags[id]) return;
+  tags[id].name = name;
+  await saveTags(tags);
+}
+
+async function deleteTagById(id) {
+  // Strip the tag from every paper, then remove the tag itself.
+  // Single batched write so the UI sees a consistent snapshot.
+  const store = await chrome.storage.local.get([PAPERS_KEY, TAGS_KEY]);
+  const papers = store[PAPERS_KEY] || {};
+  const tags = store[TAGS_KEY] || {};
+  for (const p of Object.values(papers)) {
+    if (Array.isArray(p.tags) && p.tags.includes(id)) {
+      p.tags = p.tags.filter(t => t !== id);
+    }
+  }
+  delete tags[id];
+  await chrome.storage.local.set({ [PAPERS_KEY]: papers, [TAGS_KEY]: tags });
+}
+
+function countPapersWithTag(allPapers, tagId) {
+  let n = 0;
+  for (const p of allPapers) {
+    if (Array.isArray(p.tags) && p.tags.includes(tagId)) n += 1;
+  }
+  return n;
+}
+
 async function getOpenPaperMap() {
   const tabs = await chrome.tabs.query({});
   const map = new Map(); // canonicalId → tab
@@ -345,7 +408,7 @@ function renderRow(p, openMap) {
 async function renderSidebar() {
   const nav = document.getElementById('sidebarNav');
   if (!nav) return;
-  const papers = await getPapers();
+  const [papers, tags] = await Promise.all([getPapers(), getTags()]);
   const all = Object.values(papers);
 
   const total = all.length;
@@ -363,11 +426,68 @@ async function renderSidebar() {
     `;
   }
 
+  const userTags = Object.values(tags).sort((a, b) =>
+    (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' })
+  );
+
+  function renderUserTag(tag) {
+    const count = countPapersWithTag(all, tag.id);
+    const active = activeFilter.type === 'tag' && activeFilter.tagIds.has(tag.id);
+    return `
+      <div class="sidebar-item-wrap" data-tag-row-id="${escapeHtml(tag.id)}">
+        <button class="sidebar-item${active ? ' is-active' : ''}"
+                data-filter-kind="tag"
+                data-tag-id="${escapeHtml(tag.id)}">
+          <span class="sidebar-item-label">${escapeHtml(tag.name)}</span>
+          <span class="sidebar-item-count">${count}</span>
+        </button>
+        <div class="sidebar-tag-actions">
+          <button class="sidebar-tag-action"
+                  data-tag-action="rename"
+                  data-tag-id="${escapeHtml(tag.id)}"
+                  title="Rename tag"
+                  aria-label="Rename tag">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+              <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+            </svg>
+          </button>
+          <button class="sidebar-tag-action"
+                  data-tag-action="delete"
+                  data-tag-id="${escapeHtml(tag.id)}"
+                  title="Delete tag"
+                  aria-label="Delete tag">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 6h18"/>
+              <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+              <path d="m19 6-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  const tagsBlock = userTags.length === 0
+    ? ''
+    : `
+      <div class="sidebar-divider"></div>
+      <div class="sidebar-section-label">Tags</div>
+      ${userTags.map(renderUserTag).join('')}
+    `;
+
   nav.innerHTML = `
     <div class="sidebar-section-label">Library</div>
     ${builtin('all',      'All Papers', total)}
     ${builtin('starred',  'Starred',    starredCount)}
     ${builtin('untagged', 'Untagged',   untaggedCount)}
+    ${tagsBlock}
+    <div class="sidebar-divider"></div>
+    <button class="sidebar-new-tag" id="sidebarNewTagBtn">
+      <span class="sidebar-new-tag-icon">+</span>
+      <span>New tag</span>
+    </button>
+    <input class="sidebar-new-tag-input" id="sidebarNewTagInput" type="text" placeholder="Tag name, then Enter" hidden>
   `;
 }
 
@@ -922,16 +1042,126 @@ function initSettingsMenu() {
 function initSidebar() {
   const nav = document.getElementById('sidebarNav');
   if (!nav) return;
-  nav.addEventListener('click', (e) => {
+
+  function refresh() {
+    renderSidebar();
+    const search = document.getElementById('paperSearch');
+    renderLibrary(search ? search.value : '');
+  }
+
+  nav.addEventListener('click', async (e) => {
+    // 1. Tag actions (rename / delete) — handle first since they share the
+    // same DOM tree as the filter button.
+    const actionBtn = e.target.closest('[data-tag-action]');
+    if (actionBtn) {
+      e.stopPropagation();
+      e.preventDefault();
+      const tagId = actionBtn.dataset.tagId;
+      const tags = await getTags();
+      const tag = tags[tagId];
+      if (!tag) return;
+
+      if (actionBtn.dataset.tagAction === 'rename') {
+        const next = window.prompt('Rename tag', tag.name);
+        if (next == null) return;
+        const trimmed = next.trim();
+        if (!trimmed || trimmed === tag.name) return;
+        await renameTagById(tagId, trimmed);
+        refresh();
+        return;
+      }
+      if (actionBtn.dataset.tagAction === 'delete') {
+        const papers = await getPapers();
+        const n = countPapersWithTag(Object.values(papers), tagId);
+        const msg = n === 0
+          ? `Delete tag "${tag.name}"?`
+          : `Delete tag "${tag.name}"? It's on ${n} paper${n === 1 ? '' : 's'} (the papers themselves stay).`;
+        if (!window.confirm(msg)) return;
+        // If the active filter included this tag, drop it.
+        if (activeFilter.tagIds.has(tagId)) {
+          activeFilter.tagIds.delete(tagId);
+          if (activeFilter.tagIds.size === 0) activeFilter.type = 'all';
+        }
+        await deleteTagById(tagId);
+        refresh();
+        return;
+      }
+    }
+
+    // 2. New-tag button — swap to inline input
+    const newBtn = e.target.closest('#sidebarNewTagBtn');
+    if (newBtn) {
+      const input = document.getElementById('sidebarNewTagInput');
+      newBtn.hidden = true;
+      input.hidden = false;
+      input.value = '';
+      input.focus();
+      return;
+    }
+
+    // 3. Filter buttons (all / starred / untagged / tag)
     const btn = e.target.closest('[data-filter-kind]');
     if (!btn) return;
     const kind = btn.dataset.filterKind;
     if (kind === 'all' || kind === 'starred' || kind === 'untagged') {
       activeFilter.type = kind;
       activeFilter.tagIds.clear();
-      renderSidebar();
-      const search = document.getElementById('paperSearch');
-      renderLibrary(search ? search.value : '');
+      refresh();
+      return;
+    }
+    if (kind === 'tag') {
+      const tagId = btn.dataset.tagId;
+      if (!tagId) return;
+      const alreadyOnlyThisTag =
+        activeFilter.type === 'tag' &&
+        activeFilter.tagIds.size === 1 &&
+        activeFilter.tagIds.has(tagId);
+      if (alreadyOnlyThisTag) {
+        // Click an already-active single tag → back to All Papers
+        activeFilter.type = 'all';
+        activeFilter.tagIds.clear();
+      } else {
+        activeFilter.type = 'tag';
+        activeFilter.tagIds.clear();
+        activeFilter.tagIds.add(tagId);
+      }
+      refresh();
+    }
+  });
+
+  nav.addEventListener('keydown', async (e) => {
+    if (e.target && e.target.id === 'sidebarNewTagInput') {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const name = e.target.value.trim();
+        e.target.hidden = true;
+        const btn = document.getElementById('sidebarNewTagBtn');
+        if (btn) btn.hidden = false;
+        if (name) {
+          await createTag(name);
+          refresh();
+        }
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        e.target.hidden = true;
+        const btn = document.getElementById('sidebarNewTagBtn');
+        if (btn) btn.hidden = false;
+      }
+    }
+  });
+
+  // Cancel new-tag input when it loses focus without an Enter
+  nav.addEventListener('focusout', (e) => {
+    if (e.target && e.target.id === 'sidebarNewTagInput') {
+      // Defer to allow click events on other items to commit first
+      setTimeout(() => {
+        const input = document.getElementById('sidebarNewTagInput');
+        const btn = document.getElementById('sidebarNewTagBtn');
+        if (input && !input.hidden) {
+          input.hidden = true;
+          if (btn) btn.hidden = false;
+        }
+      }, 100);
     }
   });
 }

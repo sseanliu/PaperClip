@@ -135,6 +135,98 @@ body::before {
   color: var(--accent-amber);
 }
 
+/* Wraps user-tag rows so the rename/delete actions can sit beside the
+   filter button without nesting inside it (avoids click-bubbling). */
+.sidebar-item-wrap {
+  display: flex;
+  align-items: center;
+  position: relative;
+}
+
+.sidebar-item-wrap > .sidebar-item {
+  flex: 1;
+  min-width: 0;
+}
+
+.sidebar-tag-actions {
+  display: flex;
+  gap: 0;
+  align-items: center;
+  margin-left: 2px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.12s;
+}
+
+.sidebar-item-wrap:hover .sidebar-tag-actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.sidebar-tag-action {
+  width: 24px;
+  height: 24px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.12s, color 0.12s;
+}
+
+.sidebar-tag-action:hover {
+  background: var(--warm-gray);
+  color: var(--ink);
+}
+
+/* "+ New tag" button + the inline input that replaces it on click */
+.sidebar-new-tag {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 13px;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+  transition: background 0.12s, color 0.12s;
+}
+
+.sidebar-new-tag:hover {
+  background: var(--warm-gray);
+  color: var(--ink);
+}
+
+.sidebar-new-tag-icon {
+  width: 14px;
+  text-align: center;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.sidebar-new-tag-input {
+  width: 100%;
+  padding: 8px 10px;
+  font: inherit;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 13px;
+  color: var(--ink);
+  background: var(--card-bg);
+  border: 1px solid var(--accent-amber);
+  border-radius: 6px;
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(200, 113, 58, 0.12);
+}
+
 .main-pane {
   flex: 1;
   min-width: 0;
