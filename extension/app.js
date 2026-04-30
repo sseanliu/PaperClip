@@ -10,6 +10,7 @@
  */
 
 const PAPERS_KEY = 'papers';
+const TAGS_KEY = 'tags';
 
 const SOURCE_LABELS = {
   arxiv: 'arXiv',
@@ -120,6 +121,10 @@ async function getOpenPaperMap() {
 
 // ─── Filtering / sorting ──────────────────────────────────────────────────────
 
+// Sidebar filter state. type ∈ 'all' | 'starred' | 'untagged' | 'tag'.
+// When 'tag', tagIds is a Set of tag IDs (OR'd together).
+const activeFilter = { type: 'all', tagIds: new Set() };
+
 function paperMatchesFilter(p, q) {
   if (!q) return true;
   const hay = [
@@ -131,6 +136,22 @@ function paperMatchesFilter(p, q) {
     p.url,
   ].filter(Boolean).join(' ').toLowerCase();
   return hay.includes(q);
+}
+
+function paperMatchesActiveTag(p) {
+  switch (activeFilter.type) {
+    case 'all':      return true;
+    case 'starred':  return !!p.starred;
+    case 'untagged': return !Array.isArray(p.tags) || p.tags.length === 0;
+    case 'tag': {
+      const tags = Array.isArray(p.tags) ? p.tags : [];
+      for (const id of activeFilter.tagIds) {
+        if (tags.includes(id)) return true;
+      }
+      return false;
+    }
+    default: return true;
+  }
 }
 
 function sortPapers(list) {
@@ -321,6 +342,35 @@ function renderRow(p, openMap) {
   `;
 }
 
+async function renderSidebar() {
+  const nav = document.getElementById('sidebarNav');
+  if (!nav) return;
+  const papers = await getPapers();
+  const all = Object.values(papers);
+
+  const total = all.length;
+  const starredCount = all.filter(p => p.starred).length;
+  const untaggedCount = all.filter(p => !Array.isArray(p.tags) || p.tags.length === 0).length;
+
+  function builtin(kind, label, count) {
+    const active = activeFilter.type === kind;
+    return `
+      <button class="sidebar-item${active ? ' is-active' : ''}"
+              data-filter-kind="${kind}">
+        <span class="sidebar-item-label">${escapeHtml(label)}</span>
+        <span class="sidebar-item-count">${count}</span>
+      </button>
+    `;
+  }
+
+  nav.innerHTML = `
+    <div class="sidebar-section-label">Library</div>
+    ${builtin('all',      'All Papers', total)}
+    ${builtin('starred',  'Starred',    starredCount)}
+    ${builtin('untagged', 'Untagged',   untaggedCount)}
+  `;
+}
+
 async function renderLibrary(filter = '') {
   const list = document.getElementById('paperList');
   const header = document.getElementById('paperListHeader');
@@ -332,7 +382,8 @@ async function renderLibrary(filter = '') {
   const all = Object.values(papers);
 
   const q = filter.trim().toLowerCase();
-  const filtered = q ? all.filter(p => paperMatchesFilter(p, q)) : all;
+  let filtered = q ? all.filter(p => paperMatchesFilter(p, q)) : all;
+  filtered = filtered.filter(paperMatchesActiveTag);
   const sorted = sortPapers(filtered);
 
   if (all.length === 0) {
@@ -357,7 +408,8 @@ async function renderLibrary(filter = '') {
 
   emptyEl.style.display = 'none';
   if (header) header.style.display = 'grid';
-  countEl.textContent = q
+  const isFiltered = q || activeFilter.type !== 'all';
+  countEl.textContent = isFiltered
     ? `${sorted.length} of ${all.length}`
     : `${all.length} paper${all.length === 1 ? '' : 's'}`;
   list.innerHTML = sorted.map(p => renderRow(p, openMap)).join('');
@@ -653,6 +705,7 @@ function scheduleRender(delay = 200) {
   renderTimer = setTimeout(() => {
     const search = document.getElementById('paperSearch');
     renderLibrary(search ? search.value : '');
+    renderSidebar();
   }, delay);
 }
 
@@ -864,12 +917,33 @@ function initSettingsMenu() {
   });
 }
 
+// ─── Sidebar wiring ───────────────────────────────────────────────────────────
+
+function initSidebar() {
+  const nav = document.getElementById('sidebarNav');
+  if (!nav) return;
+  nav.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-filter-kind]');
+    if (!btn) return;
+    const kind = btn.dataset.filterKind;
+    if (kind === 'all' || kind === 'starred' || kind === 'untagged') {
+      activeFilter.type = kind;
+      activeFilter.tagIds.clear();
+      renderSidebar();
+      const search = document.getElementById('paperSearch');
+      renderLibrary(search ? search.value : '');
+    }
+  });
+}
+
 function init() {
   const greeting = document.getElementById('greeting');
   const date = document.getElementById('dateDisplay');
   if (greeting) greeting.textContent = getGreeting();
   if (date) date.textContent = getDateDisplay();
   renderLibrary();
+  renderSidebar();
+  initSidebar();
   initSettingsMenu();
   initSelectionBar();
 
