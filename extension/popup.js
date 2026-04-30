@@ -112,12 +112,22 @@
     if (!paper) return;
 
     paper.attachments = paper.attachments || [];
+    let mutated = false;
     if (!paper.attachments.some(a => a.url === url)) {
       paper.attachments.push({
         url,
         title,
         addedAt: new Date().toISOString(),
       });
+      mutated = true;
+    }
+    // Linking a URL is a strong signal of interest — auto-star the paper if
+    // it isn't starred yet.
+    if (!paper.starred) {
+      paper.starred = true;
+      mutated = true;
+    }
+    if (mutated) {
       await chrome.storage.local.set({ [PAPERS_KEY]: ps });
     }
 
