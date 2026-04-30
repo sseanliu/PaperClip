@@ -880,14 +880,17 @@ function downloadJson(filename, obj) {
 }
 
 async function exportLibrary() {
-  const store = await chrome.storage.local.get(PAPERS_KEY);
+  const store = await chrome.storage.local.get([PAPERS_KEY, TAGS_KEY]);
   const papers = store[PAPERS_KEY] || {};
+  const tags = store[TAGS_KEY] || {};
   const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
   downloadJson(`paperclip-backup-${stamp}.json`, {
-    schema: 'paperclip.library.v1',
+    schema: 'paperclip.library.v2',
     exportedAt: new Date().toISOString(),
     paperCount: Object.keys(papers).length,
+    tagCount: Object.keys(tags).length,
     papers,
+    tags,
   });
   return { count: Object.keys(papers).length };
 }
@@ -933,6 +936,18 @@ function mergeImportedPaper(target, incoming) {
 
   if (incoming.readStatus === 'read') target.readStatus = 'read';
   if (incoming.starred) target.starred = true;
+
+  // Tag membership: union by id (so an auto-tagged import adds tags to
+  // existing papers without removing any the user manually added).
+  const targetTags = Array.isArray(target.tags) ? target.tags : [];
+  const incomingTags = Array.isArray(incoming.tags) ? incoming.tags : [];
+  if (incomingTags.length) {
+    const set = new Set(targetTags);
+    for (const t of incomingTags) if (typeof t === 'string' && t) set.add(t);
+    target.tags = [...set];
+  } else if (!Array.isArray(target.tags)) {
+    target.tags = targetTags;
+  }
 }
 
 async function importLibrary(file) {
@@ -943,19 +958,38 @@ async function importLibrary(file) {
   } catch {
     return { error: 'Could not parse the file as JSON.' };
   }
-  // Accept envelope shape { papers: {...} } or raw map { id: paper, ... }
-  const incoming = (parsed && typeof parsed === 'object' && parsed.papers && typeof parsed.papers === 'object')
-    ? parsed.papers
-    : parsed;
-  if (!incoming || typeof incoming !== 'object') {
+
+  // Accept envelope shape { papers: {...}, tags?: {...} } or raw map of papers
+  const hasEnvelope = parsed && typeof parsed === 'object' && parsed.papers && typeof parsed.papers === 'object';
+  const incomingPapers = hasEnvelope ? parsed.papers : parsed;
+  const incomingTags = hasEnvelope && parsed.tags && typeof parsed.tags === 'object' ? parsed.tags : {};
+
+  if (!incomingPapers || typeof incomingPapers !== 'object') {
     return { error: 'Unexpected file shape — expected an object of papers.' };
   }
 
-  const store = await chrome.storage.local.get(PAPERS_KEY);
+  const store = await chrome.storage.local.get([PAPERS_KEY, TAGS_KEY]);
   const papers = store[PAPERS_KEY] || {};
+  const tags = store[TAGS_KEY] || {};
+
+  // Merge tags map first so paper.tags references are valid afterwards.
+  // Tag ids that already exist locally keep their existing name (no rename
+  // surprises). New tag ids get added wholesale.
+  let tagsAdded = 0;
+  for (const [id, t] of Object.entries(incomingTags)) {
+    if (!t || typeof t !== 'object' || typeof id !== 'string' || !id) continue;
+    if (!tags[id]) {
+      tags[id] = {
+        id,
+        name: typeof t.name === 'string' && t.name ? t.name : id,
+        createdAt: typeof t.createdAt === 'string' ? t.createdAt : new Date().toISOString(),
+      };
+      tagsAdded++;
+    }
+  }
 
   let added = 0, merged = 0, skipped = 0;
-  for (const [id, item] of Object.entries(incoming)) {
+  for (const [id, item] of Object.entries(incomingPapers)) {
     if (!isImportablePaper(item)) { skipped++; continue; }
     if (item.id !== id) item.id = id;
     if (papers[id]) {
@@ -967,8 +1001,8 @@ async function importLibrary(file) {
     }
   }
 
-  await chrome.storage.local.set({ [PAPERS_KEY]: papers });
-  return { added, merged, skipped };
+  await chrome.storage.local.set({ [PAPERS_KEY]: papers, [TAGS_KEY]: tags });
+  return { added, merged, skipped, tagsAdded };
 }
 
 // ─── Settings menu wiring ─────────────────────────────────────────────────────
