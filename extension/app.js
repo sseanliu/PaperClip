@@ -724,9 +724,20 @@ document.addEventListener('click', async (e) => {
     if (!row) return;
 
     if (action === 'toggle-star') {
-      await patchPaper(row.dataset.id, paper => {
-        paper.starred = !paper.starred;
-      });
+      // First click on an unstarred paper: just star it.
+      // Click on an already-starred paper: open the tag picker so the user
+      // can manage tag membership (and uncheck Starred to unstar).
+      const id = row.dataset.id;
+      const store = await chrome.storage.local.get(PAPERS_KEY);
+      const papers = store[PAPERS_KEY] || {};
+      const paper = papers[id];
+      if (!paper) return;
+      if (!paper.starred) {
+        paper.starred = true;
+        await chrome.storage.local.set({ [PAPERS_KEY]: papers });
+      } else {
+        await openTagPickerFor(actionBtn, id);
+      }
       return;
     }
     if (action === 'copy-single') {
@@ -1037,6 +1048,216 @@ function initSettingsMenu() {
   });
 }
 
+// ─── Tag picker popover ──────────────────────────────────────────────────────
+
+let tagPickerEl = null;
+let tagPickerPaperId = null;
+let tagPickerAnchor = null;
+
+const PICKER_CHECKMARK = `<svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`;
+
+function ensureTagPickerEl() {
+  if (tagPickerEl) return tagPickerEl;
+  const el = document.createElement('div');
+  el.className = 'tag-picker';
+  el.hidden = true;
+  el.innerHTML = `
+    <div class="tag-picker-header">Add to tags</div>
+    <input class="tag-picker-input" type="text" placeholder="Find or create…" autocomplete="off">
+    <div class="tag-picker-list"></div>
+  `;
+  document.body.appendChild(el);
+  tagPickerEl = el;
+  return el;
+}
+
+function positionTagPicker(el, anchor) {
+  const rect = anchor.getBoundingClientRect();
+  const elH = el.offsetHeight || 320;
+  const margin = 6;
+  let top = rect.bottom + margin + window.scrollY;
+  if (rect.bottom + elH + margin + 12 > window.innerHeight) {
+    top = rect.top - margin - elH + window.scrollY;
+  }
+  el.style.top = `${top}px`;
+  el.style.right = `${Math.max(8, window.innerWidth - rect.right - window.scrollX)}px`;
+  el.style.left = 'auto';
+}
+
+async function openTagPickerFor(anchorBtn, paperId) {
+  const el = ensureTagPickerEl();
+  tagPickerPaperId = paperId;
+  tagPickerAnchor = anchorBtn;
+  el.hidden = false;
+  const input = el.querySelector('.tag-picker-input');
+  input.value = '';
+  await renderTagPickerList();
+  positionTagPicker(el, anchorBtn);
+  input.focus();
+}
+
+function closeTagPicker() {
+  if (!tagPickerEl) return;
+  tagPickerEl.hidden = true;
+  tagPickerPaperId = null;
+  tagPickerAnchor = null;
+}
+
+async function renderTagPickerList() {
+  if (!tagPickerEl || tagPickerEl.hidden || !tagPickerPaperId) return;
+  const listEl = tagPickerEl.querySelector('.tag-picker-list');
+  const input = tagPickerEl.querySelector('.tag-picker-input');
+  const filter = (input.value || '').trim().toLowerCase();
+
+  const [papers, tags] = await Promise.all([getPapers(), getTags()]);
+  const paper = papers[tagPickerPaperId];
+  if (!paper) { closeTagPicker(); return; }
+
+  const allTags = Object.values(tags).sort((a, b) =>
+    (a.name || '').localeCompare(b.name || '', undefined, { sensitivity: 'base' })
+  );
+  const matchedTags = filter
+    ? allTags.filter(t => (t.name || '').toLowerCase().includes(filter))
+    : allTags;
+
+  const exactMatch = filter && allTags.some(t => (t.name || '').toLowerCase() === filter);
+
+  const showStarred = !filter || 'starred'.includes(filter);
+  const starredHtml = showStarred ? `
+    <button class="tag-picker-item" data-picker-action="toggle-starred">
+      <span class="tag-picker-check">${paper.starred ? PICKER_CHECKMARK : ''}</span>
+      <span class="tag-picker-name">★ Starred</span>
+    </button>
+  ` : '';
+
+  const tagRowsHtml = matchedTags.map(t => {
+    const checked = Array.isArray(paper.tags) && paper.tags.includes(t.id);
+    return `
+      <button class="tag-picker-item"
+              data-picker-action="toggle-tag"
+              data-tag-id="${escapeHtml(t.id)}">
+        <span class="tag-picker-check">${checked ? PICKER_CHECKMARK : ''}</span>
+        <span class="tag-picker-name">${escapeHtml(t.name)}</span>
+      </button>
+    `;
+  }).join('');
+
+  const createHtml = filter && !exactMatch ? `
+    <div class="tag-picker-divider"></div>
+    <button class="tag-picker-item tag-picker-create" data-picker-action="create-tag">
+      <span class="tag-picker-check">+</span>
+      <span class="tag-picker-name">Create "${escapeHtml(input.value.trim())}"</span>
+    </button>
+  ` : '';
+
+  listEl.innerHTML = starredHtml + tagRowsHtml + createHtml;
+}
+
+async function pickerToggleStarred() {
+  if (!tagPickerPaperId) return;
+  await patchPaper(tagPickerPaperId, p => { p.starred = !p.starred; });
+  await renderTagPickerList();
+}
+
+async function pickerToggleTag(tagId) {
+  if (!tagPickerPaperId || !tagId) return;
+  await patchPaper(tagPickerPaperId, p => {
+    p.tags = Array.isArray(p.tags) ? p.tags : [];
+    const idx = p.tags.indexOf(tagId);
+    if (idx >= 0) p.tags.splice(idx, 1);
+    else p.tags.push(tagId);
+  });
+  await renderTagPickerList();
+}
+
+async function pickerCreateAndAttach(name) {
+  if (!tagPickerPaperId) return;
+  const id = await createTag(name);
+  if (!id) return;
+  await patchPaper(tagPickerPaperId, p => {
+    p.tags = Array.isArray(p.tags) ? p.tags : [];
+    if (!p.tags.includes(id)) p.tags.push(id);
+  });
+  const input = tagPickerEl.querySelector('.tag-picker-input');
+  input.value = '';
+  await renderTagPickerList();
+  input.focus();
+}
+
+function initTagPicker() {
+  // Picker actions
+  document.addEventListener('click', async (e) => {
+    const item = e.target.closest('[data-picker-action]');
+    if (!item) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const action = item.dataset.pickerAction;
+    if (action === 'toggle-starred') {
+      await pickerToggleStarred();
+    } else if (action === 'toggle-tag') {
+      await pickerToggleTag(item.dataset.tagId);
+    } else if (action === 'create-tag') {
+      const input = tagPickerEl.querySelector('.tag-picker-input');
+      const name = (input.value || '').trim();
+      if (name) await pickerCreateAndAttach(name);
+    }
+  });
+
+  // Re-render on input typing
+  document.addEventListener('input', (e) => {
+    if (e.target && e.target.classList && e.target.classList.contains('tag-picker-input')) {
+      renderTagPickerList();
+    }
+  });
+
+  // Enter / Escape inside the picker input
+  document.addEventListener('keydown', async (e) => {
+    if (e.target && e.target.classList && e.target.classList.contains('tag-picker-input')) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        const name = (e.target.value || '').trim();
+        if (!name) return;
+        const tags = await getTags();
+        const matched = Object.values(tags).find(
+          t => (t.name || '').toLowerCase() === name.toLowerCase()
+        );
+        if (matched) {
+          await pickerToggleTag(matched.id);
+          e.target.value = '';
+          await renderTagPickerList();
+        } else {
+          await pickerCreateAndAttach(name);
+        }
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        closeTagPicker();
+      }
+      return;
+    }
+    if (e.key === 'Escape' && tagPickerEl && !tagPickerEl.hidden) {
+      closeTagPicker();
+    }
+  });
+
+  // Click outside → close
+  document.addEventListener('click', (e) => {
+    if (!tagPickerEl || tagPickerEl.hidden) return;
+    if (e.target.closest('.tag-picker')) return;
+    if (e.target.closest('.paper-star-btn')) return;
+    closeTagPicker();
+  });
+
+  // Close on viewport resize (positioning would be stale)
+  window.addEventListener('resize', () => {
+    if (tagPickerEl && !tagPickerEl.hidden) closeTagPicker();
+  });
+  window.addEventListener('scroll', () => {
+    if (tagPickerEl && !tagPickerEl.hidden && tagPickerAnchor) {
+      positionTagPicker(tagPickerEl, tagPickerAnchor);
+    }
+  }, { passive: true });
+}
+
 // ─── Sidebar wiring ───────────────────────────────────────────────────────────
 
 function initSidebar() {
@@ -1176,6 +1397,7 @@ function init() {
   initSidebar();
   initSettingsMenu();
   initSelectionBar();
+  initTagPicker();
 
   // Ask the service worker to scan all currently-open tabs and add any
   // papers we don't have yet. Storage.onChanged will trigger a re-render
