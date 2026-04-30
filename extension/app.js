@@ -1333,18 +1333,35 @@ function initSidebar() {
     if (kind === 'tag') {
       const tagId = btn.dataset.tagId;
       if (!tagId) return;
-      const alreadyOnlyThisTag =
-        activeFilter.type === 'tag' &&
-        activeFilter.tagIds.size === 1 &&
-        activeFilter.tagIds.has(tagId);
-      if (alreadyOnlyThisTag) {
-        // Click an already-active single tag → back to All Papers
-        activeFilter.type = 'all';
-        activeFilter.tagIds.clear();
+      const meta = e.metaKey || e.ctrlKey;
+
+      if (meta) {
+        // Cmd/Ctrl-click: toggle this tag's membership in the active set
+        // (OR filter — show papers matching ANY selected tag).
+        if (activeFilter.type !== 'tag') {
+          activeFilter.type = 'tag';
+          activeFilter.tagIds = new Set();
+        }
+        if (activeFilter.tagIds.has(tagId)) {
+          activeFilter.tagIds.delete(tagId);
+          if (activeFilter.tagIds.size === 0) activeFilter.type = 'all';
+        } else {
+          activeFilter.tagIds.add(tagId);
+        }
       } else {
-        activeFilter.type = 'tag';
-        activeFilter.tagIds.clear();
-        activeFilter.tagIds.add(tagId);
+        // Plain click: replace with single-tag, or clear if same single tag
+        const alreadyOnlyThisTag =
+          activeFilter.type === 'tag' &&
+          activeFilter.tagIds.size === 1 &&
+          activeFilter.tagIds.has(tagId);
+        if (alreadyOnlyThisTag) {
+          activeFilter.type = 'all';
+          activeFilter.tagIds.clear();
+        } else {
+          activeFilter.type = 'tag';
+          activeFilter.tagIds.clear();
+          activeFilter.tagIds.add(tagId);
+        }
       }
       refresh();
     }
