@@ -564,6 +564,10 @@ header {
   position: relative;
 }
 
+.paper-row:last-child {
+  border-bottom: none;
+}
+
 .paper-row:hover {
   background: rgba(255, 253, 249, 0.7);
 }
