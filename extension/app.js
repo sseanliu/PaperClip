@@ -262,6 +262,7 @@ function renderDetail(p) {
                target="_blank"
                rel="noopener"
                title="${escapeHtml(a.url)}">${escapeHtml(a.title || a.url)}</a>
+            ${a.autoAttached ? '<span class="paper-attachment-auto" title="Auto-detected from page contents">auto</span>' : ''}
             <button class="paper-attachment-remove"
                     data-action="remove-attachment"
                     data-paper-id="${escapeHtml(p.id)}"

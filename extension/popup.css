@@ -122,6 +122,30 @@ body {
   font-weight: 500;
 }
 
+.popup-paper.is-suggested {
+  background: rgba(200, 113, 58, 0.06);
+}
+
+.popup-paper.is-suggested:hover {
+  background: rgba(200, 113, 58, 0.12);
+}
+
+.popup-section-label {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 8px 14px 4px;
+}
+
+.popup-section-divider {
+  height: 1px;
+  background: var(--warm-gray);
+  margin: 4px 12px;
+}
+
 /* ---- Empty / blocked / message states ---- */
 .popup-message {
   padding: 24px 14px;

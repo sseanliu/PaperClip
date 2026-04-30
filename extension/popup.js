@@ -67,8 +67,61 @@
     return hay.includes(q);
   }
 
+  // Suggest papers that look related to the current tab (same arXiv ID, DOI,
+  // or sub/leading title fragment in the URL or page title). Sorted by score.
+  function findSuggested() {
+    const lurl = url.toLowerCase();
+    const ltitle = title.toLowerCase();
+    const haystack = `${lurl} ${ltitle}`;
+    const urlAlnum = lurl.replace(/[^a-z0-9]/g, '');
+    const out = [];
+    for (const p of papers) {
+      let score = 0;
+      if (p.source === 'arxiv' && p.sourceId) {
+        const id = p.sourceId.toLowerCase();
+        if (id.length >= 7 && haystack.includes(id)) score = 100;
+      }
+      if (!score && p.doi) {
+        const d = String(p.doi).toLowerCase();
+        if (d.includes('/') && haystack.includes(d)) score = 100;
+      }
+      if (!score && p.title) {
+        const t = p.title.toLowerCase();
+        if (t.length >= 25 && ltitle.includes(t)) {
+          score = 95;
+        } else {
+          const lead = t.split(':')[0].trim();
+          const sub = t.replace(/^[^:]+:\s*/, '').trim();
+          if (sub && sub !== t && sub.length >= 25 && ltitle.includes(sub)) {
+            score = 90;
+          } else if (lead) {
+            const slug = lead.replace(/[^a-z0-9]/g, '');
+            if (slug.length >= 8 && urlAlnum.includes(slug)) score = 75;
+          }
+        }
+      }
+      if (score >= 65) out.push({ paper: p, score });
+    }
+    out.sort((a, b) => b.score - a.score);
+    return out.slice(0, 3);
+  }
+
   function alreadyAttached(p) {
     return Array.isArray(p.attachments) && p.attachments.some(a => a.url === url);
+  }
+
+  function paperRowHtml(p, opts = {}) {
+    const authors = (p.authors || []).slice(0, 2).join(', ')
+      + ((p.authors && p.authors.length > 2) ? ' et al.' : '');
+    const meta = [authors, p.year, p.venue].filter(Boolean).join(' · ');
+    const saved = alreadyAttached(p);
+    const cls = `popup-paper${saved ? ' is-saved' : ''}${opts.suggested ? ' is-suggested' : ''}`;
+    return `
+      <button class="${cls}" data-id="${escape(p.id)}">
+        <div class="popup-paper-title">${escape(p.title || p.id)}</div>
+        <div class="popup-paper-meta">${saved ? 'Already saved' : escape(meta || '—')}</div>
+      </button>
+    `;
   }
 
   function render() {
@@ -82,18 +135,24 @@
     }
     messageEl.style.display = 'none';
     listEl.style.display = 'block';
-    listEl.innerHTML = filtered.map(p => {
-      const authors = (p.authors || []).slice(0, 2).join(', ')
-        + ((p.authors && p.authors.length > 2) ? ' et al.' : '');
-      const meta = [authors, p.year, p.venue].filter(Boolean).join(' · ');
-      const saved = alreadyAttached(p);
-      return `
-        <button class="popup-paper${saved ? ' is-saved' : ''}" data-id="${escape(p.id)}">
-          <div class="popup-paper-title">${escape(p.title || p.id)}</div>
-          <div class="popup-paper-meta">${saved ? 'Already saved' : escape(meta || '—')}</div>
-        </button>
-      `;
-    }).join('');
+
+    // Suggestions only when there's no active search query (otherwise the
+    // user is steering with their own keywords).
+    let html = '';
+    let suggestedIds = new Set();
+    if (!q) {
+      const suggested = findSuggested().filter(s => !alreadyAttached(s.paper));
+      if (suggested.length) {
+        html += '<div class="popup-section-label">Suggested for this tab</div>';
+        html += suggested.map(s => paperRowHtml(s.paper, { suggested: true })).join('');
+        suggested.forEach(s => suggestedIds.add(s.paper.id));
+        html += '<div class="popup-section-divider"></div>';
+      }
+    }
+
+    const remaining = filtered.filter(p => !suggestedIds.has(p.id));
+    html += remaining.map(p => paperRowHtml(p)).join('');
+    listEl.innerHTML = html;
   }
 
   render();

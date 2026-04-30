@@ -175,6 +175,68 @@ async function capturePaper(tab, mode = 'visit') {
   }
 }
 
+// ─── Auto-attach related tabs ─────────────────────────────────────────────────
+//
+// When a tab loads that ISN'T itself a paper URL but mentions a paper we
+// already have (via arXiv ID or DOI in the URL or page title), attach the
+// tab to that paper as a linked URL. This is silent and zero-confirmation —
+// arXiv IDs and DOIs are unique enough that false positives are negligible.
+// Lower-confidence matches (slug / title overlap) are surfaced in the popup
+// as "Suggested" entries instead.
+
+function findVeryHighConfidenceMatch(papers, tab) {
+  if (!tab || !tab.url) return null;
+  const url = (tab.url || '').toLowerCase();
+  const title = (tab.title || '').toLowerCase();
+  const haystack = `${url} ${title}`;
+
+  for (const p of Object.values(papers)) {
+    if (p.source === 'arxiv' && p.sourceId) {
+      const id = p.sourceId.toLowerCase();
+      if (id.length >= 7 && haystack.includes(id)) {
+        return { paper: p, why: 'arxiv-id' };
+      }
+    }
+    if (p.doi) {
+      const d = String(p.doi).toLowerCase();
+      // DOIs are noisy substrings; require the slash form so e.g. '10.1109/'
+      // doesn't accidentally match dates or product codes.
+      if (d.includes('/') && haystack.includes(d)) {
+        return { paper: p, why: 'doi' };
+      }
+    }
+  }
+  return null;
+}
+
+async function maybeAutoAttachToRelated(tab) {
+  if (!tab || !tab.url || !tab.title) return;
+  if (!/^https?:/i.test(tab.url)) return;
+  // Skip tabs that ARE a paper URL — those are auto-captured as the paper
+  // itself, not as an attachment to a different paper.
+  if (classifyPaper(tab.url)) return;
+
+  const store = await chrome.storage.local.get(PAPERS_KEY);
+  const papers = store[PAPERS_KEY] || {};
+  const match = findVeryHighConfidenceMatch(papers, tab);
+  if (!match) return;
+
+  const paper = match.paper;
+  paper.attachments = Array.isArray(paper.attachments) ? paper.attachments : [];
+  if (paper.attachments.some(a => a && a.url === tab.url)) return; // already linked
+
+  paper.attachments.push({
+    url: tab.url,
+    title: tab.title,
+    addedAt: new Date().toISOString(),
+    autoAttached: true,
+    matchReason: match.why,
+  });
+  if (!paper.starred) paper.starred = true;
+
+  await chrome.storage.local.set({ [PAPERS_KEY]: papers });
+}
+
 /**
  * Scan every currently-open tab and add any papers we don't already have.
  * Used on extension install, browser startup, and on every new-tab page load.
@@ -186,14 +248,20 @@ async function backfillExistingTabs() {
     for (const t of tabs) {
       if (!t.url) continue;
       const cls = classifyPaper(t.url);
-      if (!cls) continue;
-      const before = (await chrome.storage.local.get(PAPERS_KEY))[PAPERS_KEY] || {};
-      // Skip if this canonical ID already exists OR is in another paper's
-      // aliases (merged duplicate). Otherwise we'd recreate the dupe each
-      // time the new-tab page opens.
-      if (findExistingPaper(before, cls.canonicalId)) continue;
-      await capturePaper(t, 'discover');
-      added += 1;
+      if (cls) {
+        const before = (await chrome.storage.local.get(PAPERS_KEY))[PAPERS_KEY] || {};
+        // Skip if this canonical ID already exists OR is in another paper's
+        // aliases (merged duplicate). Otherwise we'd recreate the dupe each
+        // time the new-tab page opens.
+        if (!findExistingPaper(before, cls.canonicalId)) {
+          await capturePaper(t, 'discover');
+          added += 1;
+        }
+      } else {
+        // Non-paper tab — but it might mention a paper we have (via arXiv
+        // ID or DOI). Attach it as a related URL if so.
+        await maybeAutoAttachToRelated(t);
+      }
     }
   } catch (err) {
     console.warn('[paperclip] backfill error', err);
@@ -408,7 +476,10 @@ chrome.runtime.onStartup.addListener(async () => {
 
 chrome.tabs.onCreated.addListener((tab) => {
   updateBadge();
-  if (tab && tab.url) capturePaper(tab, 'visit');
+  if (tab && tab.url) {
+    capturePaper(tab, 'visit');
+    maybeAutoAttachToRelated(tab);
+  }
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
@@ -423,7 +494,10 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   // sometimes sets the title after status='complete'). capturePaper dedupes
   // per-tab so we don't overcount visits when multiple events fire.
   if (changeInfo.url || changeInfo.status === 'complete' || changeInfo.title) {
-    if (tab && tab.url) capturePaper(tab, 'visit');
+    if (tab && tab.url) {
+      capturePaper(tab, 'visit');
+      maybeAutoAttachToRelated(tab);
+    }
   }
 });
 

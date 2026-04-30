@@ -846,6 +846,18 @@ header {
   border-bottom-color: var(--warm-gray);
 }
 
+.paper-attachment-auto {
+  font-size: 9.5px;
+  font-weight: 500;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--accent-amber);
+  background: rgba(200, 113, 58, 0.1);
+  padding: 2px 5px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
 .paper-attachment-remove {
   flex-shrink: 0;
   width: 22px;
