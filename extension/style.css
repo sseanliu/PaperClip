@@ -564,10 +564,6 @@ header {
   position: relative;
 }
 
-.paper-row:last-child {
-  border-bottom: none;
-}
-
 .paper-row:hover {
   background: rgba(255, 253, 249, 0.7);
 }
@@ -952,7 +948,6 @@ header {
 footer {
   margin-top: 48px;
   padding-top: 20px;
-  border-top: 1px solid var(--warm-gray);
   display: flex;
   justify-content: flex-end;
 }
