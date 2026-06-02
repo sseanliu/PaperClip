@@ -188,14 +188,19 @@ async function getOpenPaperMap() {
 // When 'tag', tagIds is a Set of tag IDs (OR'd together).
 const activeFilter = { type: 'all', tagIds: new Set() };
 
-function paperMatchesFilter(p, q) {
+function paperMatchesFilter(p, q, tags) {
   if (!q) return true;
+  const tagNames = Array.isArray(p.tags)
+    ? p.tags.map(id => tags && tags[id] ? tags[id].name : id).filter(Boolean).join(' ')
+    : '';
   const hay = [
     p.title,
     (p.authors || []).join(' '),
     p.venue,
     p.year,
     SOURCE_LABELS[p.source] || p.source,
+    p.note,
+    tagNames,
     p.url,
   ].filter(Boolean).join(' ').toLowerCase();
   return hay.includes(q);
@@ -305,7 +310,7 @@ function renderDetail(p) {
 
 // ─── Rendering ────────────────────────────────────────────────────────────────
 
-function renderRow(p, openMap) {
+function renderRow(p, openMap, tagsById) {
   const open = openMap.get(p.id);
   const isOpen = !!open;
 
@@ -320,6 +325,10 @@ function renderRow(p, openMap) {
 
   const sourceLabel = SOURCE_LABELS[p.source] || p.source || '';
   const hasRealMeta = authorsList.length > 0 || p.year || p.venue;
+  const tagIds = Array.isArray(p.tags) ? [...new Set(p.tags.filter(Boolean))] : [];
+  const tagNames = tagIds
+    .map(id => tagsById && tagsById[id] ? tagsById[id].name : id)
+    .filter(Boolean);
 
   // Sub-line below title: source · venue · time ago · visits · status
   const subParts = [];
@@ -368,6 +377,25 @@ function renderRow(p, openMap) {
       </div>
       <div class="paper-col-authors">${authorsStr ? escapeHtml(authorsStr) : '<span class="paper-empty-cell">—</span>'}</div>
       <div class="paper-col-year">${p.year ? escapeHtml(String(p.year)) : '<span class="paper-empty-cell">—</span>'}</div>
+      <div class="paper-col-note">
+        <textarea class="paper-note-input"
+                  data-paper-id="${escapeHtml(p.id)}"
+                  placeholder="Add a note…">${escapeHtml(p.note || '')}</textarea>
+      </div>
+      <div class="paper-col-tags">
+        <button class="paper-tags-btn"
+                data-action="edit-tags"
+                data-paper-id="${escapeHtml(p.id)}"
+                title="Edit tags"
+                aria-label="Edit tags for this paper">
+          <span class="paper-tags-list">
+            ${tagNames.length
+              ? tagNames.map(name => `<span class="paper-tag-chip">${escapeHtml(name)}</span>`).join('')
+              : '<span class="paper-tags-empty">—</span>'}
+          </span>
+          <span class="paper-tags-edit">+</span>
+        </button>
+      </div>
       <div class="paper-actions">
         <button class="paper-icon-btn paper-star-btn"
                 data-action="toggle-star"
@@ -499,11 +527,11 @@ async function renderLibrary(filter = '') {
   const emptyEl = document.getElementById('paperEmpty');
   if (!list) return;
 
-  const [papers, openMap] = await Promise.all([getPapers(), getOpenPaperMap()]);
+  const [papers, openMap, tags] = await Promise.all([getPapers(), getOpenPaperMap(), getTags()]);
   const all = Object.values(papers);
 
   const q = filter.trim().toLowerCase();
-  let filtered = q ? all.filter(p => paperMatchesFilter(p, q)) : all;
+  let filtered = q ? all.filter(p => paperMatchesFilter(p, q, tags)) : all;
   filtered = filtered.filter(paperMatchesActiveTag);
   const sorted = sortPapers(filtered);
 
@@ -533,7 +561,7 @@ async function renderLibrary(filter = '') {
   countEl.textContent = isFiltered
     ? `${sorted.length} of ${all.length}`
     : `${all.length} paper${all.length === 1 ? '' : 's'}`;
-  list.innerHTML = sorted.map(p => renderRow(p, openMap)).join('');
+  list.innerHTML = sorted.map(p => renderRow(p, openMap, tags)).join('');
 
   // Drop selections that no longer exist (e.g. after delete)
   const valid = new Set(all.map(p => p.id));
@@ -567,6 +595,10 @@ function formatPaperForCopy(p) {
     SOURCE_LABELS[p.source] || p.source || null,
   ].filter(Boolean).join(' · ');
   if (meta) lines.push(meta);
+  if (p.note) {
+    lines.push('');
+    lines.push('Note: ' + p.note);
+  }
   if (p.url) lines.push(p.url);
   if (p.abstract) {
     lines.push('');
@@ -741,6 +773,13 @@ document.addEventListener('click', async (e) => {
       }
       return;
     }
+    if (action === 'edit-tags') {
+      const paperId = actionBtn.dataset.paperId || row.dataset.id;
+      if (paperId) {
+        await openTagPickerFor(actionBtn, paperId);
+      }
+      return;
+    }
     if (action === 'copy-single') {
       const store = await chrome.storage.local.get(PAPERS_KEY);
       const papers = store[PAPERS_KEY] || {};
@@ -776,6 +815,8 @@ document.addEventListener('click', async (e) => {
       return;
     }
   }
+
+  if (e.target.closest('.paper-note-input')) return;
 
   // Click on detail panel (abstract / link / etc.) — don't toggle, and keep
   // any active selection (user is still working with the library).
@@ -826,6 +867,17 @@ document.addEventListener('click', async (e) => {
 
   const search = document.getElementById('paperSearch');
   renderLibrary(search ? search.value : '');
+});
+
+document.addEventListener('change', async (e) => {
+  const input = e.target.closest('.paper-note-input');
+  if (!input) return;
+  const paperId = input.dataset.paperId;
+  if (!paperId) return;
+  const note = input.value.trim();
+  await patchPaper(paperId, paper => {
+    paper.note = note;
+  });
 });
 
 // Coalesce rapid re-render triggers (storage writes during enrichment, tab
@@ -913,6 +965,7 @@ function mergeImportedPaper(target, incoming) {
   if (!target.year && incoming.year) target.year = incoming.year;
   if (!target.venue && incoming.venue) target.venue = incoming.venue;
   if (!target.abstract && incoming.abstract) target.abstract = incoming.abstract;
+  if (!target.note && incoming.note) target.note = incoming.note;
   if ((!target.authors || target.authors.length === 0) && Array.isArray(incoming.authors) && incoming.authors.length) {
     target.authors = incoming.authors;
   }
@@ -1157,14 +1210,6 @@ async function renderTagPickerList() {
 
   const exactMatch = filter && allTags.some(t => (t.name || '').toLowerCase() === filter);
 
-  const showStarred = !filter || 'starred'.includes(filter);
-  const starredHtml = showStarred ? `
-    <button class="tag-picker-item" data-picker-action="toggle-starred">
-      <span class="tag-picker-check">${paper.starred ? PICKER_CHECKMARK : ''}</span>
-      <span class="tag-picker-name">★ Starred</span>
-    </button>
-  ` : '';
-
   const tagRowsHtml = matchedTags.map(t => {
     const checked = Array.isArray(paper.tags) && paper.tags.includes(t.id);
     return `
@@ -1185,13 +1230,7 @@ async function renderTagPickerList() {
     </button>
   ` : '';
 
-  listEl.innerHTML = starredHtml + tagRowsHtml + createHtml;
-}
-
-async function pickerToggleStarred() {
-  if (!tagPickerPaperId) return;
-  await patchPaper(tagPickerPaperId, p => { p.starred = !p.starred; });
-  await renderTagPickerList();
+  listEl.innerHTML = tagRowsHtml + createHtml;
 }
 
 async function pickerToggleTag(tagId) {
@@ -1227,9 +1266,7 @@ function initTagPicker() {
     e.preventDefault();
     e.stopPropagation();
     const action = item.dataset.pickerAction;
-    if (action === 'toggle-starred') {
-      await pickerToggleStarred();
-    } else if (action === 'toggle-tag') {
+    if (action === 'toggle-tag') {
       await pickerToggleTag(item.dataset.tagId);
     } else if (action === 'create-tag') {
       const input = tagPickerEl.querySelector('.tag-picker-input');
@@ -1278,6 +1315,7 @@ function initTagPicker() {
   document.addEventListener('click', (e) => {
     if (!tagPickerEl || tagPickerEl.hidden) return;
     if (e.target.closest('.tag-picker')) return;
+    if (e.target.closest('.paper-tags-btn')) return;
     if (e.target.closest('.paper-star-btn')) return;
     closeTagPicker();
   });
