@@ -730,6 +730,15 @@ header {
   padding-top: 1px;
 }
 
+.sidebar-tag-color {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
 .paper-note-input {
   width: 100%;
   min-height: 54px;

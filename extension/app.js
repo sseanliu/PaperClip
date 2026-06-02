@@ -89,6 +89,24 @@ function fallbackTitle(rawTitle) {
     .trim();
 }
 
+// Deterministic hue generator for tag colors
+function computeHueFromString(s) {
+  const str = String(s || '');
+  let h = 5381;
+  for (let i = 0; i < str.length; i++) {
+    h = ((h << 5) + h) + str.charCodeAt(i); /* h * 33 + c */
+    h = h & h; // keep 32-bit
+  }
+  return Math.abs(h) % 360;
+}
+
+function tagColorsFor(tag) {
+  const hue = (tag && (tag.colorHue || tag.hue)) || computeHueFromString(tag && (tag.name || tag.id) || '');
+  const bg = `hsl(${hue} 60% 92%)`;
+  const fg = `hsl(${hue} 45% 28%)`;
+  return { hue, bg, fg };
+}
+
 function displayTitle(p) {
   const t = p.title || '';
   if (t && !looksLikeUrlOrFilename(t)) return t;
@@ -134,7 +152,8 @@ async function createTag(rawName) {
   );
   if (existing) return existing.id;
   const id = genTagId();
-  tags[id] = { id, name, createdAt: new Date().toISOString() };
+  const hue = computeHueFromString(name + id);
+  tags[id] = { id, name, createdAt: new Date().toISOString(), colorHue: hue };
   await saveTags(tags);
   return id;
 }
@@ -326,9 +345,7 @@ function renderRow(p, openMap, tagsById) {
   const sourceLabel = SOURCE_LABELS[p.source] || p.source || '';
   const hasRealMeta = authorsList.length > 0 || p.year || p.venue;
   const tagIds = Array.isArray(p.tags) ? [...new Set(p.tags.filter(Boolean))] : [];
-  const tagNames = tagIds
-    .map(id => tagsById && tagsById[id] ? tagsById[id].name : id)
-    .filter(Boolean);
+  const tagObjs = tagIds.map(id => (tagsById && tagsById[id]) ? tagsById[id] : { id, name: id });
 
   // Sub-line below title: source · venue · time ago · visits · status
   const subParts = [];
@@ -389,8 +406,11 @@ function renderRow(p, openMap, tagsById) {
                 title="Edit tags"
                 aria-label="Edit tags for this paper">
           <span class="paper-tags-list">
-            ${tagNames.length
-              ? tagNames.map(name => `<span class="paper-tag-chip">${escapeHtml(name)}</span>`).join('')
+            ${tagObjs.length
+              ? tagObjs.map(t => {
+                  const cols = tagColorsFor(t);
+                  return `<span class="paper-tag-chip" style="background:${cols.bg};color:${cols.fg}">${escapeHtml(t.name)}</span>`;
+                }).join('')
               : '<span class="paper-tags-empty">—</span>'}
           </span>
           <span class="paper-tags-edit">+</span>
@@ -467,7 +487,7 @@ async function renderSidebar() {
         <button class="sidebar-item${active ? ' is-active' : ''}"
                 data-filter-kind="tag"
                 data-tag-id="${escapeHtml(tag.id)}">
-          <span class="sidebar-item-label">${escapeHtml(tag.name)}</span>
+            <span class="sidebar-item-label"><span class="sidebar-tag-color" style="background:${tagColorsFor(tag).bg};border-radius:50%;width:10px;height:10px;display:inline-block;margin-right:8px;vertical-align:middle"></span>${escapeHtml(tag.name)}</span>
           <span class="sidebar-item-count">${count}</span>
         </button>
         <div class="sidebar-tag-actions">
@@ -757,20 +777,9 @@ document.addEventListener('click', async (e) => {
     if (!row) return;
 
     if (action === 'toggle-star') {
-      // First click on an unstarred paper: just star it.
-      // Click on an already-starred paper: open the tag picker so the user
-      // can manage tag membership (and uncheck Starred to unstar).
       const id = row.dataset.id;
-      const store = await chrome.storage.local.get(PAPERS_KEY);
-      const papers = store[PAPERS_KEY] || {};
-      const paper = papers[id];
-      if (!paper) return;
-      if (!paper.starred) {
-        paper.starred = true;
-        await chrome.storage.local.set({ [PAPERS_KEY]: papers });
-      } else {
-        await openTagPickerFor(actionBtn, id);
-      }
+      if (!id) return;
+      await patchPaper(id, p => { p.starred = !p.starred; });
       return;
     }
     if (action === 'edit-tags') {

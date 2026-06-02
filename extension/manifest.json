@@ -8,7 +8,8 @@
     "https://export.arxiv.org/*",
     "https://api.semanticscholar.org/*",
     "https://api.openreview.net/*",
-    "https://api.crossref.org/*"
+    "https://api.crossref.org/*",
+    "https://ieeexplore.ieee.org/*"
   ],
   "chrome_url_overrides": { "newtab": "index.html" },
   "background": { "service_worker": "background.js" },

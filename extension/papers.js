@@ -72,8 +72,20 @@
 
     // ── IEEE Xplore ────────────────────────────────────────────────────────
     if (host === 'ieeexplore.ieee.org') {
+      // Common forms:
+      // /document/8678448
+      // /abstract/document/8678448
+      // /stamp/stamp.jsp?tp=&arnumber=8678448
+      // /stampPDF/getPDF.jsp?tp=&arnumber=8678448
       const m = path.match(/^\/(?:abstract\/)?document\/(\d+)/i);
       if (m) return { source: 'ieee', sourceId: m[1], canonicalId: `ieee:${m[1]}` };
+
+      const arnumber = u.searchParams.get('arnumber');
+      if (arnumber && /^\d+$/.test(arnumber)) {
+        if (/^\/stamp(?:PDF)?\//i.test(path) || /\/stamp\.jsp$/i.test(path)) {
+          return { source: 'ieee', sourceId: arnumber, canonicalId: `ieee:${arnumber}` };
+        }
+      }
     }
 
     // ── SpringerLink ───────────────────────────────────────────────────────
