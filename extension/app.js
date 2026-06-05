@@ -599,10 +599,35 @@ function updateSelectionBar() {
   if (!bar) return;
   if (selectedIds.size === 0) {
     bar.hidden = true;
-    return;
+  } else {
+    bar.hidden = false;
+    countEl.textContent = `${selectedIds.size} selected`;
   }
-  bar.hidden = false;
-  countEl.textContent = `${selectedIds.size} selected`;
+  updateSelectAllCheckbox();
+}
+
+const CHECKMARK_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>`;
+const DASH_SVG = `<svg xmlns="http://www.w3.org/2000/svg" width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/></svg>`;
+
+function getVisiblePaperIds() {
+  return [...document.querySelectorAll('.paper-row[data-id]')].map(r => r.dataset.id).filter(Boolean);
+}
+
+function updateSelectAllCheckbox() {
+  const cb = document.getElementById('selectAllCheckbox');
+  if (!cb) return;
+  const visible = getVisiblePaperIds();
+  const selectedVisible = visible.filter(id => selectedIds.has(id));
+  cb.classList.remove('is-checked', 'is-indeterminate');
+  if (visible.length > 0 && selectedVisible.length === visible.length) {
+    cb.classList.add('is-checked');
+    cb.innerHTML = CHECKMARK_SVG;
+  } else if (selectedVisible.length > 0) {
+    cb.classList.add('is-indeterminate');
+    cb.innerHTML = DASH_SVG;
+  } else {
+    cb.innerHTML = '';
+  }
 }
 
 function formatPaperForCopy(p) {
@@ -692,6 +717,22 @@ function clearSelection() {
 }
 
 function initSelectionBar() {
+  const selectAllCb = document.getElementById('selectAllCheckbox');
+  if (selectAllCb) {
+    selectAllCb.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const visible = getVisiblePaperIds();
+      const allSelected = visible.length > 0 && visible.every(id => selectedIds.has(id));
+      if (allSelected) {
+        visible.forEach(id => selectedIds.delete(id));
+      } else {
+        visible.forEach(id => selectedIds.add(id));
+      }
+      const search = document.getElementById('paperSearch');
+      renderLibrary(search ? search.value : '');
+    });
+  }
+
   const bar = document.getElementById('selectionBar');
   if (!bar) return;
   bar.addEventListener('click', async (e) => {

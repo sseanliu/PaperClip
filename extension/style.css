@@ -568,6 +568,37 @@ header {
   background: rgba(255, 253, 249, 0.7);
 }
 
+/* ---- Select-all checkbox in header ---- */
+.paper-select-all-checkbox {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1.5px solid var(--warm-gray);
+  border-radius: 3px;
+  background: transparent;
+  color: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.paper-select-all-checkbox:hover {
+  border-color: var(--muted);
+}
+
+.paper-select-all-checkbox.is-checked {
+  background: var(--accent-amber);
+  border-color: var(--accent-amber);
+  color: var(--paper);
+}
+
+.paper-select-all-checkbox.is-indeterminate {
+  border-color: var(--accent-amber);
+  color: var(--accent-amber);
+}
+
 /* ---- Multi-select checkbox ---- */
 .paper-select-checkbox {
   width: 16px;

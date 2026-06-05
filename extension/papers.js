@@ -62,7 +62,8 @@
     }
 
     // ── ACM Digital Library ────────────────────────────────────────────────
-    if (host === 'dl.acm.org') {
+    // Also matches EZproxy variants like dl-acm-org.university.idm.oclc.org
+    if (host === 'dl.acm.org' || /^dl-acm-org\..+/.test(host)) {
       const m = path.match(/^\/doi\/(?:abs\/|pdf\/|fullHtml\/|epdf\/)?(10\.[^/]+\/[^/]+)/i);
       if (m) {
         const doi = m[1].toLowerCase();
@@ -71,7 +72,8 @@
     }
 
     // ── IEEE Xplore ────────────────────────────────────────────────────────
-    if (host === 'ieeexplore.ieee.org') {
+    // Also matches EZproxy variants like ieeexplore-ieee-org.university.idm.oclc.org
+    if (host === 'ieeexplore.ieee.org' || /^ieeexplore-ieee-org\..+/.test(host)) {
       // Common forms:
       // /document/8678448
       // /abstract/document/8678448
@@ -89,7 +91,8 @@
     }
 
     // ── SpringerLink ───────────────────────────────────────────────────────
-    if (host === 'link.springer.com') {
+    // Also matches EZproxy variants like link-springer-com.university.idm.oclc.org
+    if (host === 'link.springer.com' || /^link-springer-com\..+/.test(host)) {
       const m = path.match(/^\/(?:article|chapter|book|referenceworkentry)\/(10\.[^/]+\/[^/]+)/i);
       if (m) {
         const doi = m[1].toLowerCase();
