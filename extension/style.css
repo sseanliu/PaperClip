@@ -531,7 +531,7 @@ header {
 .paper-list-header,
 .paper-row {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) minmax(0, 0.7fr) 56px 92px;
+  grid-template-columns: 18px minmax(150px, 1fr) minmax(0, 0.7fr) 56px minmax(200px, 1fr) minmax(100px, 0.5fr) 92px;
   gap: 14px;
   align-items: center;
 }
@@ -566,6 +566,37 @@ header {
 
 .paper-row:hover {
   background: rgba(255, 253, 249, 0.7);
+}
+
+/* ---- Select-all checkbox in header ---- */
+.paper-select-all-checkbox {
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: 1.5px solid var(--warm-gray);
+  border-radius: 3px;
+  background: transparent;
+  color: transparent;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.paper-select-all-checkbox:hover {
+  border-color: var(--muted);
+}
+
+.paper-select-all-checkbox.is-checked {
+  background: var(--accent-amber);
+  border-color: var(--accent-amber);
+  color: var(--paper);
+}
+
+.paper-select-all-checkbox.is-indeterminate {
+  border-color: var(--accent-amber);
+  color: var(--accent-amber);
 }
 
 /* ---- Multi-select checkbox ---- */
@@ -657,6 +688,111 @@ header {
   text-align: left;
   font-variant-numeric: tabular-nums;
   margin-top: 1px;
+}
+
+.paper-col-note {
+  min-width: 0;
+}
+
+.paper-col-tags {
+  min-width: 0;
+}
+
+.paper-tags-btn {
+  width: 100%;
+  min-height: 54px;
+  padding: 7px 8px;
+  border: 1px solid var(--warm-gray);
+  border-radius: 8px;
+  background: var(--card-bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: left;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+  outline: none;
+}
+
+.paper-tags-btn:hover {
+  border-color: var(--muted);
+}
+
+.paper-tags-btn:focus {
+  border-color: var(--accent-amber);
+  box-shadow: 0 0 0 2px rgba(200, 113, 58, 0.12);
+}
+
+.paper-tags-list {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.paper-tag-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(90, 122, 98, 0.12);
+  color: var(--accent-sage);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.paper-tags-empty {
+  color: var(--muted);
+  opacity: 0.75;
+}
+
+.paper-tags-edit {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-weight: 500;
+  line-height: 1;
+  padding-top: 1px;
+}
+
+.sidebar-tag-color {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+.paper-note-input {
+  width: 100%;
+  min-height: 54px;
+  padding: 7px 8px;
+  border: 1px solid var(--warm-gray);
+  border-radius: 8px;
+  background: var(--card-bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.45;
+  resize: vertical;
+  outline: none;
+}
+
+.paper-note-input:focus {
+  border-color: var(--accent-amber);
+  box-shadow: 0 0 0 2px rgba(200, 113, 58, 0.12);
+}
+
+.paper-note-input::placeholder {
+  color: var(--muted);
+  opacity: 0.75;
 }
 
 .paper-empty-cell {

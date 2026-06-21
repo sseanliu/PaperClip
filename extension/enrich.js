@@ -120,8 +120,71 @@
     return (s || '').replace(/<[^>]+>/g, '');
   }
 
-  async function enrichCrossref(paper) {
-    const doi = paper.doi || paper.sourceId;
+  function decodeHtmlEntities(s) {
+    return (s || '')
+      .replace(/&lt;/g, '<')
+      .replace(/&gt;/g, '>')
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&amp;/g, '&');
+  }
+
+  function escapeRegExp(s) {
+    return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function readMetaContent(html, name) {
+    const re = new RegExp(
+      `<meta\\b[^>]*\\bname=["']${escapeRegExp(name)}["'][^>]*\\bcontent=["']([^"']*)["'][^>]*>`,
+      'i'
+    );
+    const m = html.match(re);
+    return m ? decodeHtmlEntities(m[1]) : '';
+  }
+
+  function readMetaContents(html, name) {
+    const re = new RegExp(
+      `<meta\\b[^>]*\\bname=["']${escapeRegExp(name)}["'][^>]*\\bcontent=["']([^"']*)["'][^>]*>`,
+      'gi'
+    );
+    const out = [];
+    let m;
+    while ((m = re.exec(html))) {
+      out.push(decodeHtmlEntities(m[1]));
+    }
+    return out;
+  }
+
+  function readScriptField(html, field) {
+    const re = new RegExp(`(?:"|')${escapeRegExp(field)}(?:"|')\\s*:\\s*(?:"([^"]+)"|'([^']+)')`, 'i');
+    const m = html.match(re);
+    return m ? decodeHtmlEntities(m[1] || m[2] || '') : '';
+  }
+
+  function normalizeDoi(raw) {
+    const s = cleanWhitespace(String(raw || ''))
+      .replace(/^doi:\s*/i, '')
+      .replace(/^https?:\/\/doi\.org\//i, '')
+      .replace(/^https?:\/\/dx\.doi\.org\//i, '');
+    const m = s.match(/10\.\d{4,9}\/\S+/i);
+    return m ? m[0].replace(/[\s"'>).,;]+$/g, '') : '';
+  }
+
+  function extractDoiFromIEEEHtml(html) {
+    const candidates = [
+      readMetaContent(html, 'citation_doi'),
+      readMetaContent(html, 'dc.identifier'),
+      readScriptField(html, 'doiLink'),
+      readScriptField(html, 'doi'),
+    ];
+    for (const value of candidates) {
+      const doi = normalizeDoi(value);
+      if (doi) return doi;
+    }
+    return '';
+  }
+
+  async function enrichCrossrefByDoi(doi) {
     if (!doi) return null;
     const url = `https://api.crossref.org/works/${encodeURIComponent(doi)}`;
     const r = await fetch(url, {
@@ -149,6 +212,82 @@
     if (year) out.year = year;
     if (venue) out.venue = cleanWhitespace(venue);
     if (abstract) out.abstract = abstract;
+    return out;
+  }
+
+  async function enrichCrossref(paper) {
+    const doi = paper.doi || paper.sourceId;
+    if (!doi) return null;
+    return enrichCrossrefByDoi(doi);
+  }
+
+  // ─── IEEE Xplore web metadata (arnumber-based) ──────────────────────────
+
+  function ieeeArnumberFromPaper(paper) {
+    if (paper && /^\d+$/.test(String(paper.sourceId || ''))) return String(paper.sourceId);
+    if (paper && paper.url) {
+      try {
+        const u = new URL(paper.url);
+        const q = u.searchParams.get('arnumber');
+        if (q && /^\d+$/.test(q)) return q;
+        const m = (u.pathname || '').match(/\/(?:abstract\/)?document\/(\d+)/i);
+        if (m) return m[1];
+      } catch {}
+    }
+    return null;
+  }
+
+  async function enrichIEEE(paper) {
+    const arnumber = ieeeArnumberFromPaper(paper);
+    if (!arnumber) return null;
+
+    const url = `https://ieeexplore.ieee.org/document/${encodeURIComponent(arnumber)}/`;
+    const r = await fetch(url, {
+      headers: {
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+      }
+    });
+    if (!r.ok) throw new Error(`ieee: HTTP ${r.status}`);
+    const html = await r.text();
+
+    const title =
+      readMetaContent(html, 'citation_title') ||
+      readMetaContent(html, 'dc.title') ||
+      '';
+
+    const authors = readMetaContents(html, 'citation_author')
+      .map(a => cleanWhitespace(a))
+      .filter(Boolean);
+
+    const venue = cleanWhitespace(
+      readMetaContent(html, 'citation_journal_title') ||
+      readMetaContent(html, 'citation_conference_title') ||
+      readMetaContent(html, 'citation_publication_title') ||
+      ''
+    );
+
+    const abstract = cleanWhitespace(
+      readMetaContent(html, 'citation_abstract') ||
+      readMetaContent(html, 'description') ||
+      ''
+    );
+
+    const doi = extractDoiFromIEEEHtml(html);
+
+    let year = null;
+    const pubDate =
+      readMetaContent(html, 'citation_publication_date') ||
+      readMetaContent(html, 'citation_date') ||
+      readMetaContent(html, 'citation_year') ||
+      '';
+    const yearMatch = String(pubDate).match(/\b(19|20)\d{2}\b/);
+    if (yearMatch) year = parseInt(yearMatch[0], 10);
+
+    const out = { title: cleanWhitespace(title), authors };
+    if (year) out.year = year;
+    if (venue) out.venue = venue;
+    if (abstract) out.abstract = abstract;
+    if (doi) out.doi = doi.toLowerCase();
     return out;
   }
 
@@ -239,6 +378,9 @@
         case 'science':
           primary = await enrichCrossref(paper);
           break;
+        case 'ieee':
+          primary = await enrichIEEE(paper);
+          break;
       }
     } catch (err) {
       primaryError = err;
@@ -249,8 +391,23 @@
     let supplementError = null;
 
     try {
-      const identifier = s2IdentifierFor(paper);
-      if (identifier) supplement = await fetchS2(identifier);
+      if (paper.source === 'ieee' && primary && primary.doi) {
+        const crossref = await enrichCrossrefByDoi(primary.doi);
+        let s2 = null;
+        try {
+          s2 = await fetchS2(`DOI:${primary.doi}`);
+        } catch (err) {
+          supplementError = err;
+          console.warn('[paperclip] S2 supplement failed', paper.id, err);
+        }
+        supplement = pickMerged(crossref, s2);
+      } else {
+        // If the source-specific fetch discovered a DOI, prefer it for S2.
+        const identifier = (primary && primary.doi)
+          ? `DOI:${primary.doi}`
+          : s2IdentifierFor(paper);
+        if (identifier) supplement = await fetchS2(identifier);
+      }
     } catch (err) {
       supplementError = err;
       console.warn('[paperclip] S2 supplement failed', paper.id, err);
