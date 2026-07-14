@@ -3,7 +3,7 @@
   "name": "PaperClip",
   "version": "1.0.0",
   "description": "Your new tab page becomes a Zotero-style library of every academic paper you've ever opened. Auto-captures and enriches with metadata.",
-  "permissions": ["tabs", "activeTab", "storage"],
+  "permissions": ["tabs", "activeTab", "storage", "nativeMessaging", "alarms"],
   "host_permissions": [
     "https://export.arxiv.org/*",
     "https://api.semanticscholar.org/*",

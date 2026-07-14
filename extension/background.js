@@ -517,3 +517,52 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 // Initial run
 updateBadge();
 backfillExistingTabs().then(() => retryStuckEnrichments());
+
+// ---------------------------------------------------------------------------
+// Obsidian bridge: mirror the library to the local vault via native messaging.
+// Debounced through chrome.alarms (MV3 service workers outlive setTimeout but
+// not vice versa). Fails silent when the host isn't installed — capture always
+// comes first.
+
+const VAULT_SYNC_HOST = 'com.xiaoan.paperclip';
+const VAULT_SYNC_ALARM = 'vault-sync';
+const VAULT_SYNC_DEBOUNCE_MIN = 0.5;
+
+function scheduleVaultSync(delayMinutes = VAULT_SYNC_DEBOUNCE_MIN) {
+  chrome.alarms.create(VAULT_SYNC_ALARM, { delayInMinutes: delayMinutes });
+}
+
+async function syncToVault() {
+  try {
+    const store = await chrome.storage.local.get([PAPERS_KEY, 'tags']);
+    const papers = store[PAPERS_KEY] || {};
+    const tags = store.tags || {};
+    const library = {
+      schema: 'paperclip.library.v2',
+      exportedAt: new Date().toISOString(),
+      paperCount: Object.keys(papers).length,
+      tagCount: Object.keys(tags).length,
+      papers,
+      tags,
+    };
+    chrome.runtime.sendNativeMessage(VAULT_SYNC_HOST, { type: 'sync', library }, (reply) => {
+      if (chrome.runtime.lastError) return; // host not installed on this machine
+      if (reply && reply.ok && reply.membership) {
+        chrome.storage.local.set({ corpusMembership: reply.membership });
+      }
+    });
+  } catch (e) {
+    // Never let sync problems interfere with capture.
+  }
+}
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && (changes[PAPERS_KEY] || changes.tags)) scheduleVaultSync();
+});
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === VAULT_SYNC_ALARM) syncToVault();
+});
+
+// Catch anything missed while the browser was closed.
+scheduleVaultSync(1);
