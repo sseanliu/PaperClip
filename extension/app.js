@@ -639,6 +639,13 @@ function clearSelection() {
   renderLibrary(search ? search.value : '');
 }
 
+// Sidebar navigation is modal: picking a collection replaces the search filter
+// rather than stacking on top of it.
+function clearSearchInput() {
+  const search = document.getElementById('paperSearch');
+  if (search && search.value) search.value = '';
+}
+
 function initSelectionBar() {
   const bar = document.getElementById('selectionBar');
   if (!bar) return;
@@ -1358,6 +1365,7 @@ function initSidebar() {
     // 3. Filter buttons (all / starred / untagged / tag)
     const btn = e.target.closest('[data-filter-kind]');
     if (!btn) return;
+    clearSearchInput();
     const kind = btn.dataset.filterKind;
     if (kind === 'all' || kind === 'starred' || kind === 'untagged') {
       activeFilter.type = kind;
