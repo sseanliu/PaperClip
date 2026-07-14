@@ -547,13 +547,42 @@ async function syncToVault() {
     };
     chrome.runtime.sendNativeMessage(VAULT_SYNC_HOST, { type: 'sync', library }, (reply) => {
       if (chrome.runtime.lastError) return; // host not installed on this machine
-      if (reply && reply.ok && reply.membership) {
-        chrome.storage.local.set({ corpusMembership: reply.membership });
-      }
+      if (reply && reply.ok) applyVaultReply(reply);
     });
   } catch (e) {
     // Never let sync problems interfere with capture.
   }
+}
+
+// The vault is a peer, not a mirror: edits made there (agent retags, inbox
+// checkbox verbs) come back as vaultDeltas. Applying them re-fires onChanged
+// and one more sync round, after which the ledger base matches and the deltas
+// are empty — the cycle terminates by convergence, not by suppression.
+async function applyVaultReply(reply) {
+  if (reply.membership) {
+    chrome.storage.local.set({ corpusMembership: reply.membership });
+  }
+  const deltas = reply.vaultDeltas || {};
+  const paperEdits = deltas.papers || {};
+  const newTags = deltas.tags || {};
+  if (!Object.keys(paperEdits).length && !Object.keys(newTags).length) return;
+  const store = await chrome.storage.local.get([PAPERS_KEY, 'tags']);
+  const papers = store[PAPERS_KEY] || {};
+  const tags = store.tags || {};
+  let touched = false;
+  for (const [id, fields] of Object.entries(paperEdits)) {
+    if (papers[id]) {
+      Object.assign(papers[id], fields);
+      touched = true;
+    }
+  }
+  for (const [tid, tag] of Object.entries(newTags)) {
+    if (!tags[tid]) {
+      tags[tid] = tag;
+      touched = true;
+    }
+  }
+  if (touched) await chrome.storage.local.set({ [PAPERS_KEY]: papers, tags });
 }
 
 chrome.storage.onChanged.addListener((changes, area) => {
@@ -562,6 +591,12 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === VAULT_SYNC_ALARM) syncToVault();
+});
+
+// New-tab opens already ping us for a backfill; ride the same signal to pull
+// vault-side edits promptly (the worker is awake, no alarm needed).
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg && msg.type === 'paperclip:backfill') syncToVault();
 });
 
 // Catch anything missed while the browser was closed.
