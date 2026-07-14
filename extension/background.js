@@ -565,7 +565,8 @@ async function applyVaultReply(reply) {
   const deltas = reply.vaultDeltas || {};
   const paperEdits = deltas.papers || {};
   const newTags = deltas.tags || {};
-  if (!Object.keys(paperEdits).length && !Object.keys(newTags).length) return;
+  const removeTags = deltas.removeTags || [];
+  if (!Object.keys(paperEdits).length && !Object.keys(newTags).length && !removeTags.length) return;
   const store = await chrome.storage.local.get([PAPERS_KEY, 'tags']);
   const papers = store[PAPERS_KEY] || {};
   const tags = store.tags || {};
@@ -580,6 +581,18 @@ async function applyVaultReply(reply) {
     if (!tags[tid]) {
       tags[tid] = tag;
       touched = true;
+    }
+  }
+  for (const tid of removeTags) {
+    if (tags[tid]) {
+      delete tags[tid];
+      touched = true;
+    }
+    for (const p of Object.values(papers)) {
+      if (Array.isArray(p.tags) && p.tags.includes(tid)) {
+        p.tags = p.tags.filter((t) => t !== tid);
+        touched = true;
+      }
     }
   }
   if (touched) await chrome.storage.local.set({ [PAPERS_KEY]: papers, tags });
