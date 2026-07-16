@@ -1600,17 +1600,6 @@ body.pdf-panel-resizing .pdf-frame {
   border-radius: 2px;
 }
 
-.lector-copy-btn {
-  font-family: 'DM Sans', sans-serif;
-  font-size: 12px;
-  color: var(--card-bg);
-  background: var(--ink);
-  border: none;
-  border-radius: 6px;
-  padding: 5px 12px;
-  cursor: pointer;
-}
-
 /* pdf.js annotation layer (links) — minimal scoped subset */
 .lector-root .annotationLayer {
   position: absolute;

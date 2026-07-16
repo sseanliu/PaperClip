@@ -10,7 +10,6 @@ import {
   PreviousPage,
   Root,
   Search,
-  SelectionTooltip,
   TextLayer,
   Thumbnail,
   Thumbnails,
@@ -111,11 +110,6 @@ function SearchPane({ onClose }) {
   );
 }
 
-function copySelection() {
-  const sel = String(window.getSelection() || "");
-  if (sel) navigator.clipboard.writeText(sel);
-}
-
 function Viewer({ url, onError }) {
   const [showThumbs, setShowThumbs] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
@@ -203,11 +197,6 @@ function Viewer({ url, onError }) {
           </div>
         </div>
       </Search>
-      <SelectionTooltip>
-        <button type="button" className="lector-copy-btn" onClick={copySelection}>
-          Copy
-        </button>
-      </SelectionTooltip>
     </Root>
   );
 }
