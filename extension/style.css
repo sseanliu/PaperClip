@@ -1026,7 +1026,20 @@ footer {
   background: var(--card-bg);
   border-left: 1px solid var(--warm-gray);
   box-shadow: -16px 0 40px rgba(26, 22, 19, 0.10);
-  z-index: 60;
+  /* Above the settings gear (100), below its open dropdown (200). */
+  z-index: 150;
+  animation: pdf-panel-in 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* The explicit display:flex above would otherwise override the hidden
+   attribute's UA display:none — restate it or the panel never closes. */
+.pdf-panel[hidden] {
+  display: none;
+}
+
+@keyframes pdf-panel-in {
+  from { transform: translateX(24px); opacity: 0; }
+  to   { transform: translateX(0);    opacity: 1; }
 }
 
 /* Make room so list rows aren't hidden behind the panel. */
