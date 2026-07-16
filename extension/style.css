@@ -1429,7 +1429,16 @@ body.pdf-panel-resizing .pdf-frame {
 }
 
 .lector-root .textLayer ::selection {
-  background: rgba(90, 122, 98, 0.35);
+  background: rgba(90, 122, 98, 0.25);
+}
+
+.lector-root .textLayer br::selection {
+  background: transparent;
+}
+
+.lector-root .textLayer span.markedContent {
+  top: 0;
+  height: 0;
 }
 
 /* ---- Lector full viewer chrome ---- */
