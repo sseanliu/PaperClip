@@ -1139,6 +1139,24 @@ body.pdf-panel-open .app-shell {
   background: #efeae3;
 }
 
+/* Iframe mode: the embedded viewer owns the whole body. */
+.pdf-panel-body.is-frame {
+  padding: 0;
+  overflow: hidden;
+}
+
+.pdf-frame {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+
+/* While dragging the divider, don't let the iframe swallow mouse events. */
+body.pdf-panel-resizing .pdf-frame {
+  pointer-events: none;
+}
+
 .pdf-page {
   margin: 0 auto 14px;
   max-width: 100%;

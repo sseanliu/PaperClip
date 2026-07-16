@@ -86,6 +86,26 @@ async function renderPageInto(holder, pageNum, generation) {
   holder.appendChild(canvas);
 }
 
+/**
+ * Can this URL be embedded in an iframe? Checks X-Frame-Options /
+ * CSP frame-ancestors via a HEAD request (host permissions let us read the
+ * headers). Unknown/unreachable → assume yes; the PDF.js fallback stays one
+ * click away either way.
+ */
+async function canFrame(url) {
+  try {
+    const r = await fetch(url, { method: 'HEAD' });
+    const xfo = (r.headers.get('x-frame-options') || '').toLowerCase();
+    if (xfo.includes('deny') || xfo.includes('sameorigin')) return false;
+    const csp = r.headers.get('content-security-policy') || '';
+    const m = csp.match(/frame-ancestors\s+([^;]+)/i);
+    if (m && !m[1].includes('*')) return false;
+    return true;
+  } catch {
+    return true;
+  }
+}
+
 async function open(paper) {
   if (!els() || !paper) return;
 
@@ -100,6 +120,7 @@ async function open(paper) {
 
   await teardownDoc();
   const generation = renderGeneration;
+  bodyEl.classList.remove('is-frame');
 
   if (!url) {
     showMessage('No direct PDF known for this paper.', paper.url);
@@ -107,6 +128,23 @@ async function open(paper) {
   }
 
   showMessage('Loading PDF…');
+
+  // Preferred path: embed the PDF URL directly so the user's own PDF viewer
+  // (Chrome's built-in, Google Scholar PDF Reader, …) handles it — same as
+  // Overleaf's preview pane. Fall back to our PDF.js renderer only when the
+  // site forbids framing.
+  if (await canFrame(url)) {
+    if (generation !== renderGeneration) return;
+    bodyEl.innerHTML = '';
+    bodyEl.classList.add('is-frame');
+    const frame = document.createElement('iframe');
+    frame.className = 'pdf-frame';
+    frame.src = url;
+    frame.title = titleEl.textContent;
+    bodyEl.appendChild(frame);
+    return;
+  }
+  if (generation !== renderGeneration) return;
 
   let doc;
   try {
@@ -168,6 +206,7 @@ async function close() {
   currentPaperId = null;
   currentUrl = null;
   await teardownDoc();
+  bodyEl.classList.remove('is-frame');
   bodyEl.innerHTML = '';
 }
 
