@@ -1042,10 +1042,8 @@ footer {
   to   { transform: translateX(0);    opacity: 1; }
 }
 
-/* Make room so list rows aren't hidden behind the panel. */
-body.pdf-panel-open .main-pane {
-  margin-right: min(48vw, 760px);
-}
+/* Notion-style: the peek overlays the page — the list keeps its full
+   width underneath rather than reflowing into squeezed columns. */
 
 .pdf-panel-header {
   display: flex;
