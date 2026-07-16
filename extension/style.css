@@ -1403,3 +1403,32 @@ body.pdf-panel-resizing .pdf-frame {
   font-size: 13px;
   color: var(--muted);
 }
+
+/* Minimal pdf.js text layer (scoped) — replaces pdf_viewer.css, whose global
+   :root/button/input rules restyled the whole page. */
+.lector-root .textLayer {
+  position: absolute;
+  text-align: initial;
+  inset: 0;
+  overflow: clip;
+  opacity: 1;
+  line-height: 1;
+  -webkit-text-size-adjust: none;
+  text-size-adjust: none;
+  forced-color-adjust: none;
+  transform-origin: 0 0;
+  caret-color: CanvasText;
+  z-index: 0;
+}
+
+.lector-root .textLayer :is(span, br) {
+  color: transparent;
+  position: absolute;
+  white-space: pre;
+  cursor: text;
+  transform-origin: 0% 0%;
+}
+
+.lector-root .textLayer ::selection {
+  background: rgba(90, 122, 98, 0.35);
+}
