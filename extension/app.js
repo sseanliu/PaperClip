@@ -917,13 +917,10 @@ document.addEventListener('click', async (e) => {
   // Click anywhere else on the row: open the PDF side peek (or close it if
   // it's already showing this paper).
   if (window.PaperViewer) {
-    if (window.PaperViewer.isOpenFor(id)) {
-      window.PaperViewer.close();
-    } else {
-      const papers = await getPapers();
-      const paper = papers[id];
-      if (paper) window.PaperViewer.open(paper);
-    }
+    if (window.PaperViewer.isOpenFor(id)) return;
+    const papers = await getPapers();
+    const paper = papers[id];
+    if (paper) window.PaperViewer.open(paper);
   }
 });
 
