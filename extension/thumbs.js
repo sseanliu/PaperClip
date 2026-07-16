@@ -19,8 +19,22 @@ const PAPERS_KEY = 'papers';
 const THUMB_PREFIX = 'thumb:';
 const FAIL_PREFIX = 'thumbfail:';
 const FAIL_RETRY_MS = 7 * 24 * 60 * 60 * 1000; // retry failures after a week
-const TARGET_WIDTH = 280; // 2x of the ~140px max display size
+const TARGET_WIDTH = 480; // 2x of the ~240px max display size (gallery cards)
 const THROTTLE_MS = 800;
+
+// Bump to invalidate every cached thumbnail (e.g. after a size change); the
+// queue then re-renders them all at the current TARGET_WIDTH.
+const THUMB_VERSION = 2;
+const THUMB_VERSION_KEY = 'thumbver';
+
+async function sweepStaleVersion() {
+  const store = await chrome.storage.local.get(THUMB_VERSION_KEY);
+  if (store[THUMB_VERSION_KEY] === THUMB_VERSION) return;
+  const all = await chrome.storage.local.get(null);
+  const stale = Object.keys(all).filter(k => k.startsWith(THUMB_PREFIX) || k.startsWith(FAIL_PREFIX));
+  if (stale.length) await chrome.storage.local.remove(stale);
+  await chrome.storage.local.set({ [THUMB_VERSION_KEY]: THUMB_VERSION });
+}
 
 /** Resolve a fetchable PDF URL for a paper, or null if we don't know one. */
 export function pdfUrlFor(p) {
@@ -79,6 +93,7 @@ async function processQueue() {
   if (running) { rerunRequested = true; return; }
   running = true;
   try {
+    await sweepStaleVersion();
     const store = await chrome.storage.local.get(PAPERS_KEY);
     const papers = store[PAPERS_KEY] || {};
     await pruneOrphans(papers);

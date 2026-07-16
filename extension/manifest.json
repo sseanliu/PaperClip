@@ -3,12 +3,23 @@
   "name": "PaperClip",
   "version": "1.0.0",
   "description": "Your new tab page becomes a Zotero-style library of every academic paper you've ever opened. Auto-captures and enriches with metadata.",
-  "permissions": ["tabs", "activeTab", "storage", "nativeMessaging", "alarms", "unlimitedStorage"],
+  "permissions": [
+    "tabs",
+    "activeTab",
+    "storage",
+    "nativeMessaging",
+    "alarms",
+    "unlimitedStorage"
+  ],
   "host_permissions": [
     "https://*/*"
   ],
-  "chrome_url_overrides": { "newtab": "index.html" },
-  "background": { "service_worker": "background.js" },
+  "chrome_url_overrides": {
+    "newtab": "index.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
   "action": {
     "default_title": "Save tab to PaperClip",
     "default_popup": "popup.html",
