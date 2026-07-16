@@ -1042,8 +1042,12 @@ footer {
   to   { transform: translateX(0);    opacity: 1; }
 }
 
-/* Notion-style: the peek overlays the page — the list keeps its full
-   width underneath rather than reflowing into squeezed columns. */
+/* With the peek open, pin the shell to the left edge (instead of centered)
+   so sidebar + list sit in the uncovered region rather than under the panel. */
+body.pdf-panel-open .app-shell {
+  max-width: calc(100vw - min(48vw, 760px));
+  margin: 0;
+}
 
 .pdf-panel-header {
   display: flex;
