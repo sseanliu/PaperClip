@@ -247,6 +247,57 @@ function setViewMode(mode) {
   }
 }
 
+// Keyboard cursor over the rendered results (command-palette style): ArrowDown
+// from the search field enters the results, arrows move (grid-aware in
+// gallery), each move previews in the side peek, ArrowUp from the top row
+// returns to the input. The input keeps DOM focus throughout so typing
+// continues to refine the query.
+let renderedIds = [];
+let cursorId = null;
+let previewTimer = null;
+
+function galleryCols() {
+  if (viewMode !== 'gallery') return 1;
+  const list = document.getElementById('paperList');
+  if (!list) return 1;
+  return Math.max(1, getComputedStyle(list).gridTemplateColumns.split(' ').length);
+}
+
+function applyCursor() {
+  const list = document.getElementById('paperList');
+  if (!list) return;
+  for (const el of list.querySelectorAll('.is-cursor')) el.classList.remove('is-cursor');
+  if (!cursorId) return;
+  const el = list.querySelector(`.paper-row[data-id="${CSS.escape(cursorId)}"]`);
+  if (el) {
+    el.classList.add('is-cursor');
+    el.scrollIntoView({ block: 'nearest' });
+  }
+}
+
+function schedulePreview(id) {
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(async () => {
+    if (!window.PaperViewer || window.PaperViewer.isOpenFor(id)) return;
+    const papers = await getPapers();
+    const paper = papers[id];
+    if (paper) window.PaperViewer.open(paper);
+  }, 150);
+}
+
+function setCursorIndex(i) {
+  if (!renderedIds.length) return;
+  const idx = Math.max(0, Math.min(i, renderedIds.length - 1));
+  cursorId = renderedIds[idx];
+  applyCursor();
+  schedulePreview(cursorId);
+}
+
+function clearCursor() {
+  cursorId = null;
+  applyCursor();
+}
+
 function sortPapers(list) {
   // Sort by the active mode's timestamp — newest first. Each mode falls back
   // to the other timestamp so entries missing a field don't sink to the bottom.
@@ -584,6 +635,9 @@ async function renderLibrary(filter = '') {
   filtered = filtered.filter(paperMatchesActiveTag);
   const sorted = sortPapers(filtered);
 
+  renderedIds = sorted.map(p => p.id);
+  if (cursorId && !renderedIds.includes(cursorId)) cursorId = null;
+
   if (all.length === 0) {
     list.innerHTML = '';
     if (header) header.style.display = 'none';
@@ -615,6 +669,7 @@ async function renderLibrary(filter = '') {
   const thumbs = await chrome.storage.local.get(sorted.map(p => THUMB_PREFIX + p.id));
   const render = gallery ? renderCard : renderRow;
   list.innerHTML = sorted.map(p => render(p, openMap, thumbs[THUMB_PREFIX + p.id])).join('');
+  applyCursor();
 
   // Drop selections that no longer exist (e.g. after delete)
   const valid = new Set(all.map(p => p.id));
@@ -1578,6 +1633,40 @@ function init() {
     search.focus();
     search.select();
   });
+
+  const searchInput = document.getElementById('paperSearch');
+  if (searchInput) {
+    searchInput.addEventListener('input', () => { cursorId = null; });
+    searchInput.addEventListener('keydown', (e) => {
+      if (!renderedIds.length) return;
+      const idx = cursorId ? renderedIds.indexOf(cursorId) : -1;
+      const cols = galleryCols();
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        setCursorIndex(idx < 0 ? 0 : idx + cols);
+      } else if (e.key === 'ArrowUp') {
+        if (idx < 0) return;
+        e.preventDefault();
+        if (idx - cols < 0) clearCursor();
+        else setCursorIndex(idx - cols);
+      } else if (e.key === 'ArrowRight' && idx >= 0 && viewMode === 'gallery') {
+        e.preventDefault();
+        setCursorIndex(idx + 1);
+      } else if (e.key === 'ArrowLeft' && idx >= 0 && viewMode === 'gallery') {
+        e.preventDefault();
+        setCursorIndex(idx - 1);
+      } else if (e.key === 'Enter' && idx >= 0) {
+        e.preventDefault();
+        const title = document.querySelector(
+          `#paperList .paper-row[data-id="${CSS.escape(cursorId)}"] .paper-title-text`
+        );
+        if (title) title.click();
+      } else if (e.key === 'Escape' && idx >= 0) {
+        e.preventDefault();
+        clearCursor();
+      }
+    });
+  }
 
   renderLibrary();
   renderSidebar();

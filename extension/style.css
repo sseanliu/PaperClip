@@ -1359,3 +1359,17 @@ body.pdf-panel-resizing .pdf-frame {
 .paper-search-wrap:focus-within .search-kbd {
   display: none;
 }
+
+/* ---- Keyboard cursor over results ---- */
+.paper-row.is-cursor {
+  background: rgba(90, 122, 98, 0.08);
+}
+
+.paper-list.is-gallery .paper-row.is-cursor {
+  background: transparent;
+}
+
+.paper-card.is-cursor .paper-card-cover {
+  border-color: var(--accent-sage);
+  box-shadow: 0 0 0 3px rgba(90, 122, 98, 0.15);
+}
