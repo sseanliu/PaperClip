@@ -29,6 +29,45 @@ import { createRoot } from "react-dom/client";
 
 GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("vendor/lector-pdf.worker.min.mjs");
 
+// pdf.js styles text-layer spans with the FALLBACK font family only, so the
+// invisible selectable text is measured in sans-serif while the canvas draws
+// the embedded font: intra-line character positions drift and word selection
+// lands off by a character. The embedded fonts ARE loaded (FontLoader adds
+// them to document.fonts as g_*), so rewrite the text-content styles to lead
+// with the loaded family: TextLayer then measures, calibrates --scale-x, and
+// renders selection geometry against the true glyph metrics.
+let textContentPatched = false;
+function patchTextContentFonts(pageProxy) {
+  if (textContentPatched) return;
+  textContentPatched = true;
+  const proto = Object.getPrototypeOf(pageProxy);
+  const orig = proto.streamTextContent;
+  proto.streamTextContent = function (...args) {
+    const stream = orig.apply(this, args);
+    const reader = stream.getReader();
+    return new ReadableStream({
+      async pull(controller) {
+        const { value, done } = await reader.read();
+        if (done) {
+          controller.close();
+          return;
+        }
+        if (value && value.styles) {
+          for (const [name, style] of Object.entries(value.styles)) {
+            if (name.startsWith("g_") && style.fontFamily && !style.fontFamily.includes(name)) {
+              style.fontFamily = `"${name}", ${style.fontFamily}`;
+            }
+          }
+        }
+        controller.enqueue(value);
+      },
+      cancel(reason) {
+        return reader.cancel(reason);
+      },
+    });
+  };
+}
+
 const I = ({ children, size = 15 }) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
@@ -184,6 +223,9 @@ function Viewer({ url, onError }) {
       tabIndex={-1}
       className="lector-root"
       onError={onError}
+      onDocumentLoad={({ proxy }) => {
+        proxy.getPage(1).then(patchTextContentFonts).catch(() => {});
+      }}
       loader={<div className="lector-loading">Loading PDF…</div>}
     >
       <SelectionWatcher />
