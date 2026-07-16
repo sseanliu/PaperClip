@@ -1,5 +1,5 @@
 import { CanvasLayer, Page, Pages, Root, TextLayer } from "@anaralabs/lector";
-import { GlobalWorkerOptions } from "pdfjs-dist";
+import { GlobalWorkerOptions } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { createElement } from "react";
 import { createRoot } from "react-dom/client";
 import "pdfjs-dist/web/pdf_viewer.css";
