@@ -1652,3 +1652,9 @@ body.pdf-panel-resizing .pdf-frame {
   width: 100%;
   height: 100%;
 }
+
+/* ---- Drag-to-tag drop target ---- */
+.sidebar-item.is-drop-target {
+  background: rgba(90, 122, 98, 0.12);
+  box-shadow: inset 0 0 0 1px var(--accent-sage);
+}

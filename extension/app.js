@@ -431,6 +431,7 @@ function renderRow(p, openMap, thumb) {
 
   return `
     <div class="${classes.join(' ')}"
+         draggable="true"
          data-id="${escapeHtml(p.id)}"
          data-url="${escapeHtml(p.url)}"
          ${open ? `data-tab-id="${open.id}" data-window-id="${open.windowId}"` : ''}>
@@ -514,6 +515,7 @@ function renderCard(p, openMap, thumb) {
 
   return `
     <div class="${classes.join(' ')}"
+         draggable="true"
          data-id="${escapeHtml(p.id)}"
          data-url="${escapeHtml(p.url)}"
          ${open ? `data-tab-id="${open.id}" data-window-id="${open.windowId}"` : ''}>
@@ -808,6 +810,66 @@ function initSelectionBar() {
 }
 
 // ─── Event wiring ─────────────────────────────────────────────────────────────
+
+// ─── Drag papers onto sidebar tags to tag them ────────────────────────────────
+
+const DRAG_MIME = 'application/x-paperclip-ids';
+
+function clearDropTargets() {
+  for (const el of document.querySelectorAll('.sidebar-item.is-drop-target')) {
+    el.classList.remove('is-drop-target');
+  }
+}
+
+document.addEventListener('dragstart', (e) => {
+  const row = e.target.closest && e.target.closest('.paper-row');
+  if (!row || !row.dataset.id) return;
+  const ids = selectedIds.has(row.dataset.id) ? [...selectedIds] : [row.dataset.id];
+  e.dataTransfer.setData(DRAG_MIME, JSON.stringify(ids));
+  e.dataTransfer.effectAllowed = 'link';
+});
+
+document.addEventListener('dragend', clearDropTargets);
+
+function dropTargetFor(e) {
+  if (![...e.dataTransfer.types].includes(DRAG_MIME)) return null;
+  return e.target.closest &&
+    e.target.closest('.sidebar-item[data-filter-kind="tag"], .sidebar-item[data-filter-kind="starred"]');
+}
+
+document.addEventListener('dragover', (e) => {
+  const item = dropTargetFor(e);
+  clearDropTargets();
+  if (!item) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'link';
+  item.classList.add('is-drop-target');
+});
+
+document.addEventListener('drop', async (e) => {
+  const item = dropTargetFor(e);
+  clearDropTargets();
+  if (!item) return;
+  e.preventDefault();
+  let ids;
+  try {
+    ids = JSON.parse(e.dataTransfer.getData(DRAG_MIME));
+  } catch {
+    return;
+  }
+  const kind = item.dataset.filterKind;
+  const tagId = item.dataset.tagId;
+  for (const id of ids) {
+    await patchPaper(id, (paper) => {
+      if (kind === 'starred') {
+        paper.starred = true;
+        return;
+      }
+      if (!Array.isArray(paper.tags)) paper.tags = [];
+      if (!paper.tags.includes(tagId)) paper.tags.push(tagId);
+    });
+  }
+});
 
 async function patchPaper(id, mutate) {
   const store = await chrome.storage.local.get(PAPERS_KEY);
