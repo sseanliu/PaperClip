@@ -229,18 +229,12 @@ function setSortMode(mode) {
 }
 
 function sortPapers(list) {
-  // Starred papers go to the top. Within each group (starred and unstarred),
-  // sort by the active mode's timestamp — newest first. Each mode falls back
+  // Sort by the active mode's timestamp — newest first. Each mode falls back
   // to the other timestamp so entries missing a field don't sink to the bottom.
   const key = sortMode === 'opened'
     ? (p) => p.lastSeenAt || p.firstSeenAt || ''
     : (p) => p.firstSeenAt || p.lastSeenAt || '';
-  return list.slice().sort((a, b) => {
-    const aStar = a.starred ? 1 : 0;
-    const bStar = b.starred ? 1 : 0;
-    if (aStar !== bStar) return bStar - aStar;
-    return key(b).localeCompare(key(a));
-  });
+  return list.slice().sort((a, b) => key(b).localeCompare(key(a)));
 }
 
 // ─── Expanded-row state ──────────────────────────────────────────────────────
