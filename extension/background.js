@@ -37,6 +37,7 @@ const SOURCE_LABELS = {
   nips: 'NeurIPS',
   mlr: 'PMLR',
   acl: 'ACL',
+  cvf: 'CVF',
   semanticscholar: 'Semantic Scholar',
   pdf: 'PDF',
 };
@@ -460,17 +461,56 @@ function dedupeAcrossExternalIds(papers, paperId) {
   return true;
 }
 
+/**
+ * Re-classify stored generic-PDF entries whose URL the classifier now
+ * understands (e.g. a newly added site pattern like CVF Open Access). Moves
+ * the entry to its proper canonical ID — merging if that paper already
+ * exists — and resets enrichment so real metadata gets fetched.
+ */
+async function reclassifyGenericPdfs() {
+  const store = await chrome.storage.local.get(PAPERS_KEY);
+  const papers = store[PAPERS_KEY] || {};
+  let changed = false;
+
+  for (const p of Object.values(papers)) {
+    if (p.source !== 'pdf' || !p.url) continue;
+    const cls = classifyPaper(p.url);
+    if (!cls || cls.source === 'pdf' || cls.canonicalId === p.id) continue;
+
+    delete papers[p.id];
+    const existing = findExistingPaper(papers, cls.canonicalId);
+    if (existing) {
+      mergePapers(existing, p);
+    } else {
+      const aliases = new Set(p.aliases || []);
+      aliases.add(p.id);
+      p.aliases = [...aliases];
+      p.id = cls.canonicalId;
+      p.source = cls.source;
+      p.sourceId = cls.sourceId;
+      if (cls.doi && !p.doi) p.doi = cls.doi;
+      p.enrichmentStatus = 'pending';
+      papers[cls.canonicalId] = p;
+    }
+    changed = true;
+  }
+
+  if (changed) await chrome.storage.local.set({ [PAPERS_KEY]: papers });
+}
+
 // ─── Event listeners ──────────────────────────────────────────────────────────
 
 chrome.runtime.onInstalled.addListener(async () => {
   updateBadge();
   await backfillExistingTabs();
+  await reclassifyGenericPdfs();
   retryStuckEnrichments();
 });
 
 chrome.runtime.onStartup.addListener(async () => {
   updateBadge();
   await backfillExistingTabs();
+  await reclassifyGenericPdfs();
   retryStuckEnrichments();
 });
 

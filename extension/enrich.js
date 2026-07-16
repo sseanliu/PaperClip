@@ -152,6 +152,73 @@
     return out;
   }
 
+  // ─── CVF Open Access (openaccess.thecvf.com) ──────────────────────────────
+  //
+  // No metadata API, but the filename encodes everything:
+  //   Doorenbos_Video_Panels_for_Long_Video_Understanding_CVPR_2026_paper
+  //   (old style: Surname_Title_Words_2013_CVPR_paper)
+  // Parse a title/venue/year guess from the stem, then confirm via S2's
+  // title-match endpoint to pick up authors / abstract / externalIds.
+
+  function parseCvfStem(stem) {
+    let s = stem.replace(/_(?:paper|supplemental)$/i, '');
+    let venue = null;
+    let year = null;
+    const m = s.match(/_(?:(CVPR|ICCV|WACV|ACCV)_(\d{4})|(\d{4})_(CVPR|ICCV|WACV|ACCV))$/i);
+    if (m) {
+      venue = (m[1] || m[4]).toUpperCase();
+      year = parseInt(m[2] || m[3], 10);
+      s = s.slice(0, m.index);
+    }
+    const parts = s.split('_').filter(Boolean);
+    if (parts.length > 1) parts.shift(); // leading token is the first author's surname
+    return { title: cleanWhitespace(parts.join(' ')), venue, year };
+  }
+
+  function normalizedTitle(s) {
+    return (s || '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+  }
+
+  async function enrichCvf(paper) {
+    const stem = paper.sourceId;
+    if (!stem) return null;
+    const guess = parseCvfStem(stem);
+    if (!guess.title) return null;
+
+    // Worst case, the URL alone gives us a readable title + venue + year.
+    const out = { title: guess.title, authors: [] };
+    if (guess.year) out.year = guess.year;
+    if (guess.venue) out.venue = guess.venue;
+
+    try {
+      const url = `https://api.semanticscholar.org/graph/v1/paper/search/match?query=${encodeURIComponent(guess.title)}&fields=title,authors,year,venue,abstract,externalIds`;
+      const r = await fetch(url);
+      if (r.ok) {
+        const json = await r.json();
+        const hit = json && json.data && json.data[0];
+        // Only trust the match if it really is the same paper. URL stems drop
+        // punctuation, so compare normalized titles.
+        const a = normalizedTitle(guess.title);
+        const b = normalizedTitle(hit && hit.title);
+        if (a && b && (a === b || a.includes(b) || b.includes(a))) {
+          out.title = cleanWhitespace(hit.title);
+          out.authors = Array.isArray(hit.authors)
+            ? hit.authors.map(x => cleanWhitespace(x && x.name)).filter(Boolean)
+            : [];
+          // The URL-derived venue/year (camera-ready, e.g. CVPR 2026) beats
+          // S2's, which often reflects the arXiv preprint instead.
+          if (hit.year && !out.year) out.year = hit.year;
+          if (hit.venue && !out.venue) out.venue = cleanWhitespace(hit.venue);
+          if (hit.abstract) out.abstract = cleanWhitespace(hit.abstract);
+          if (hit.externalIds) out.externalIds = hit.externalIds;
+        }
+      }
+    } catch (err) {
+      console.warn('[paperclip] cvf S2 title match failed', paper.id, err);
+    }
+    return out;
+  }
+
   // ─── Semantic Scholar (universal — provides venue + cross-source IDs) ─────
   //
   // Returns externalIds like { DOI, ArXiv, ACL, MAG, ... } so the same paper
@@ -231,6 +298,9 @@
           break;
         case 'openreview':
           primary = await enrichOpenReview(paper);
+          break;
+        case 'cvf':
+          primary = await enrichCvf(paper);
           break;
         case 'biorxiv':
         case 'medrxiv':

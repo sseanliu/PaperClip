@@ -133,6 +133,19 @@
       if (m) return { source: 'semanticscholar', sourceId: m[1], canonicalId: `s2:${m[1]}` };
     }
 
+    // ── CVF Open Access (CVPR / ICCV / WACV) ───────────────────────────────
+    if (host === 'openaccess.thecvf.com') {
+      // /content/CVPR2026/papers/Surname_Title_Words_CVPR_2026_paper.pdf
+      // /content/CVPR2026/html/Surname_..._paper.html
+      // old style: /content_cvpr_2013/papers/Surname_..._2013_CVPR_paper.pdf
+      const m = path.match(/\/([\w.\-]+?_(?:paper|supplemental))\.(?:pdf|html)$/i);
+      if (m) {
+        // The supplemental PDF is the same paper — collapse onto the paper stem.
+        const stem = m[1].replace(/_supplemental$/i, '_paper');
+        return { source: 'cvf', sourceId: stem, canonicalId: `cvf:${stem}` };
+      }
+    }
+
     // ── Generic PDF (fallback for any URL ending in .pdf) ──────────────────
     if (/\.pdf$/i.test(path)) {
       // Normalize URL: drop fragment, keep query (some servers need it)

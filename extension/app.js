@@ -25,6 +25,7 @@ const SOURCE_LABELS = {
   nips: 'NeurIPS',
   mlr: 'PMLR',
   acl: 'ACL Anthology',
+  cvf: 'CVF',
   semanticscholar: 'Semantic Scholar',
   pdf: 'PDF',
 };
