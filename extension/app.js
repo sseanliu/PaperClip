@@ -315,7 +315,9 @@ function renderDetail(p) {
 
 // ─── Rendering ────────────────────────────────────────────────────────────────
 
-function renderRow(p, openMap) {
+const THUMB_PREFIX = 'thumb:';
+
+function renderRow(p, openMap, thumb) {
   const open = openMap.get(p.id);
   const isOpen = !!open;
 
@@ -372,6 +374,11 @@ function renderRow(p, openMap) {
           <path d="M20 6 9 17l-5-5"/>
         </svg>
       </button>
+      <div class="paper-thumb-cell">
+        ${thumb
+          ? `<img class="paper-thumb" src="${thumb}" alt="" loading="lazy">`
+          : '<div class="paper-thumb paper-thumb-placeholder"></div>'}
+      </div>
       <div class="paper-main">
         <div class="paper-title"><span class="paper-title-text">${escapeHtml(title)}</span></div>
         <div class="paper-sub">${subParts.join(' · ')}</div>
@@ -543,7 +550,8 @@ async function renderLibrary(filter = '') {
   countEl.textContent = isFiltered
     ? `${sorted.length} of ${all.length}`
     : `${all.length} paper${all.length === 1 ? '' : 's'}`;
-  list.innerHTML = sorted.map(p => renderRow(p, openMap)).join('');
+  const thumbs = await chrome.storage.local.get(sorted.map(p => THUMB_PREFIX + p.id));
+  list.innerHTML = sorted.map(p => renderRow(p, openMap, thumbs[THUMB_PREFIX + p.id])).join('');
 
   // Drop selections that no longer exist (e.g. after delete)
   const valid = new Set(all.map(p => p.id));
@@ -864,10 +872,13 @@ document.addEventListener('input', (e) => {
   }
 });
 
-// Re-render whenever the service worker writes new papers / enrichment.
+// Re-render whenever the service worker writes new papers / enrichment,
+// or the thumbnail renderer caches a new first-page image.
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== 'local' || !changes[PAPERS_KEY]) return;
-  scheduleRender(150);
+  if (area !== 'local') return;
+  const relevant = changes[PAPERS_KEY]
+    || Object.keys(changes).some(k => k.startsWith(THUMB_PREFIX));
+  if (relevant) scheduleRender(150);
 });
 
 // Re-render on tab open/close so the open-status dots stay accurate.

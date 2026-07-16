@@ -557,13 +557,33 @@ header {
   font-weight: 500;
 }
 
-/* ---- Table layout: select | title+sub | authors | year | actions ---- */
+/* ---- Table layout: select | thumb | title+sub | authors | year | actions ---- */
 .paper-list-header,
 .paper-row {
   display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) minmax(0, 0.7fr) 56px 92px;
+  grid-template-columns: 18px 44px minmax(0, 1fr) minmax(0, 0.7fr) 56px 92px;
   gap: 14px;
   align-items: center;
+}
+
+/* ---- First-page thumbnail ---- */
+.paper-thumb-cell {
+  width: 44px;
+}
+
+.paper-thumb {
+  display: block;
+  width: 44px;
+  height: 58px;
+  object-fit: cover;
+  object-position: top;
+  border: 1px solid var(--warm-gray);
+  border-radius: 3px;
+  background: var(--card-bg);
+}
+
+.paper-thumb-placeholder {
+  border-style: dashed;
 }
 
 .paper-list-header {
