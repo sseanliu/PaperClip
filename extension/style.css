@@ -1295,10 +1295,6 @@ body.pdf-panel-resizing .pdf-frame {
   box-shadow: 0 3px 10px var(--shadow);
 }
 
-.paper-card.is-open .paper-card-cover {
-  border-color: var(--accent-sage);
-}
-
 .paper-card-thumb {
   display: block;
   width: 100%;
