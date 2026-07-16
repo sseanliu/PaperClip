@@ -179,6 +179,65 @@ function isOpenFor(paperId) {
   return isOpen() && currentPaperId === paperId;
 }
 
+// ─── Divider drag: resize the panel; pages rescale live (CSS) and
+// re-render crisply at the new width once the drag ends. ───────────────────
+
+const PEEK_WIDTH_KEY = 'paperclip-peek-width';
+
+function applyPeekWidth(px) {
+  document.documentElement.style.setProperty('--peek-w', `${Math.round(px)}px`);
+}
+
+function clampPeekWidth(px) {
+  const min = 320;
+  const max = Math.max(min, window.innerWidth * 0.8);
+  return Math.min(max, Math.max(min, px));
+}
+
+async function rerenderVisiblePages() {
+  if (!currentDoc || !bodyEl) return;
+  const generation = renderGeneration;
+  const holders = [...bodyEl.querySelectorAll('.pdf-page')];
+  for (const holder of holders) {
+    if (generation !== renderGeneration) return;
+    if (!holder.querySelector('canvas')) continue; // placeholder — observer handles it
+    const n = parseInt(holder.dataset.page, 10);
+    try {
+      await renderPageInto(holder, n, generation);
+    } catch (err) {
+      console.warn('[paperclip] page rerender failed', n, err && err.message);
+    }
+  }
+}
+
+function initResizer() {
+  const resizer = document.getElementById('pdfPanelResizer');
+  if (!resizer) return;
+
+  const saved = parseInt(localStorage.getItem(PEEK_WIDTH_KEY) || '', 10);
+  if (saved) applyPeekWidth(clampPeekWidth(saved));
+
+  resizer.addEventListener('mousedown', (e) => {
+    e.preventDefault();
+    document.body.classList.add('pdf-panel-resizing');
+    let width = panel.getBoundingClientRect().width;
+
+    const onMove = (ev) => {
+      width = clampPeekWidth(window.innerWidth - ev.clientX);
+      applyPeekWidth(width);
+    };
+    const onUp = () => {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      document.body.classList.remove('pdf-panel-resizing');
+      localStorage.setItem(PEEK_WIDTH_KEY, String(Math.round(width)));
+      rerenderVisiblePages();
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+}
+
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && isOpen()) close();
 });
@@ -189,6 +248,7 @@ document.addEventListener('DOMContentLoaded', () => {
   openTabBtn.addEventListener('click', () => {
     if (currentUrl) chrome.tabs.create({ url: currentUrl });
   });
+  initResizer();
 });
 
 window.PaperViewer = { open, close, isOpen, isOpenFor };

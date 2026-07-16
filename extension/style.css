@@ -1020,7 +1020,7 @@ footer {
   top: 0;
   right: 0;
   bottom: 0;
-  width: min(48vw, 760px);
+  width: var(--peek-w);
   display: flex;
   flex-direction: column;
   background: var(--card-bg);
@@ -1029,6 +1029,43 @@ footer {
   /* Above the settings gear (100), below its open dropdown (200). */
   z-index: 150;
   animation: pdf-panel-in 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* Draggable divider on the panel's left edge. */
+.pdf-panel-resizer {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  width: 8px;
+  cursor: col-resize;
+  z-index: 1;
+}
+
+.pdf-panel-resizer::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 2px;
+  background: transparent;
+  transition: background 0.15s;
+}
+
+.pdf-panel-resizer:hover::after,
+body.pdf-panel-resizing .pdf-panel-resizer::after {
+  background: var(--accent-sage);
+}
+
+/* While dragging, kill text selection and let the resizer own the cursor. */
+body.pdf-panel-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+body.pdf-panel-resizing .pdf-panel {
+  animation: none;
 }
 
 /* The explicit display:flex above would otherwise override the hidden
@@ -1042,11 +1079,17 @@ footer {
   to   { transform: translateX(0);    opacity: 1; }
 }
 
-/* With the peek open, pin the shell to the left edge (instead of centered)
-   so sidebar + list sit in the uncovered region rather than under the panel. */
+/* With the peek open, the shell is confined to the uncovered region and the
+   sidebar + list center themselves inside it. --peek-w is set by the divider
+   drag in viewer.js. */
+:root {
+  --peek-w: min(48vw, 760px);
+}
+
 body.pdf-panel-open .app-shell {
-  max-width: calc(100vw - min(48vw, 760px));
+  max-width: calc(100vw - var(--peek-w));
   margin: 0;
+  justify-content: center;
 }
 
 .pdf-panel-header {
