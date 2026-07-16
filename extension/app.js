@@ -512,6 +512,7 @@ function renderCard(p, openMap, thumb) {
   const classes = ['paper-row', 'paper-card'];
   if (open) classes.push('is-open');
   if (p.starred) classes.push('is-starred');
+  if (selectedIds.has(p.id)) classes.push('is-selected');
 
   return `
     <div class="${classes.join(' ')}"
@@ -1014,6 +1015,15 @@ document.addEventListener('click', async (e) => {
   }
   const id = row.dataset.id;
   if (!id) return;
+
+  // Cmd-click (Ctrl-click on non-Mac): toggle multi-selection, both views.
+  if (e.metaKey || e.ctrlKey) {
+    if (selectedIds.has(id)) selectedIds.delete(id);
+    else selectedIds.add(id);
+    const search = document.getElementById('paperSearch');
+    renderLibrary(search ? search.value : '');
+    return;
+  }
 
   // Click on the title text: open the paper (jump to existing tab or open
   // a new one). Click anywhere else on the row: toggle expand.
