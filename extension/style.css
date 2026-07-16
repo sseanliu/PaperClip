@@ -1056,7 +1056,6 @@ footer {
   flex-direction: column;
   background: var(--card-bg);
   border-left: 1px solid var(--warm-gray);
-  box-shadow: -16px 0 40px rgba(26, 22, 19, 0.10);
   /* Above the settings gear (100), below its open dropdown (200). */
   z-index: 150;
   animation: pdf-panel-in 0.22s cubic-bezier(0.22, 1, 0.36, 1);
