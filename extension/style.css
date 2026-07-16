@@ -1429,7 +1429,18 @@ body.pdf-panel-resizing .pdf-frame {
 }
 
 .lector-root .textLayer ::selection {
-  background: rgba(90, 122, 98, 0.25);
+  background: transparent;
+}
+
+.lector-sel-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.lector-sel {
+  position: absolute;
+  background: rgba(90, 122, 98, 0.22);
 }
 
 .lector-root .textLayer br::selection {

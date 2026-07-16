@@ -1,6 +1,7 @@
 import {
   AnnotationLayer,
   CanvasLayer,
+  CustomLayer,
   CurrentPage,
   CurrentZoom,
   HighlightLayer,
@@ -20,9 +21,10 @@ import {
   usePdf,
   usePdfJump,
   useSearch,
+  useSelectionDimensions,
 } from "@anaralabs/lector";
 import { GlobalWorkerOptions } from "pdfjs-dist/legacy/build/pdf.mjs";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 
 GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("vendor/lector-pdf.worker.min.mjs");
@@ -110,6 +112,67 @@ function SearchPane({ onClose }) {
   );
 }
 
+// Scholar-style selection: native ::selection is transparent; we repaint the
+// live selection as merged, line-consolidated bands via Lector's geometry.
+const selStore = {
+  rects: [],
+  listeners: new Set(),
+  set(rects) {
+    selStore.rects = rects;
+    for (const l of selStore.listeners) l();
+  },
+  subscribe(l) {
+    selStore.listeners.add(l);
+    return () => selStore.listeners.delete(l);
+  },
+  get() {
+    return selStore.rects;
+  },
+};
+
+function SelectionWatcher() {
+  const { getAnnotationDimension } = useSelectionDimensions();
+  useEffect(() => {
+    let raf = 0;
+    const update = () => {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || !sel.rangeCount) {
+        if (selStore.rects.length) selStore.set([]);
+        return;
+      }
+      const dim = getAnnotationDimension();
+      selStore.set(dim?.highlights ?? []);
+    };
+    const onSel = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(update);
+    };
+    document.addEventListener("selectionchange", onSel);
+    return () => {
+      document.removeEventListener("selectionchange", onSel);
+      cancelAnimationFrame(raf);
+    };
+  }, [getAnnotationDimension]);
+  return null;
+}
+
+function SelectionRects({ pageNumber }) {
+  const rects = useSyncExternalStore(selStore.subscribe, selStore.get);
+  const mine = rects.filter((r) => r.pageNumber === pageNumber);
+  if (!mine.length) return null;
+  return (
+    <div className="lector-sel-layer">
+      {mine.map((r, i) => (
+        <div
+          key={i}
+          className="lector-sel"
+          style={{ top: r.top, left: r.left, width: r.width, height: r.height }}
+        />
+      ))}
+    </div>
+  );
+}
+
 function Viewer({ url, onError }) {
   const [showThumbs, setShowThumbs] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
@@ -123,6 +186,7 @@ function Viewer({ url, onError }) {
       onError={onError}
       loader={<div className="lector-loading">Loading PDF…</div>}
     >
+      <SelectionWatcher />
       <Search>
         <div className="lector-shell">
           <div className="lector-toolbar">
@@ -191,6 +255,7 @@ function Viewer({ url, onError }) {
                 <TextLayer />
                 <AnnotationLayer />
                 <HighlightLayer className="lector-hl" />
+                <CustomLayer>{(n) => <SelectionRects pageNumber={n} />}</CustomLayer>
               </Page>
             </Pages>
             {showSearch && <SearchPane onClose={() => setShowSearch(false)} />}

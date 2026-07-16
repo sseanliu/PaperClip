@@ -42,6 +42,20 @@ if (hasPanel === 'object') {
     });
   });
   await new Promise(r => setTimeout(r, 8000));
+  // simulate a multi-line selection over the first text layer
+  await page.evaluate(() => {
+    const layer = document.querySelector('#pdfPanelBody .textLayer');
+    if (!layer) return;
+    const spans = layer.querySelectorAll('span');
+    if (spans.length < 12) return;
+    const range = document.createRange();
+    range.setStartBefore(spans[10]);
+    range.setEndAfter(spans[40]);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  });
+  await new Promise(r => setTimeout(r, 800));
   const state = await page.evaluate(() => {
     const b = document.getElementById('pdfPanelBody');
     return {
@@ -50,6 +64,7 @@ if (hasPanel === 'object') {
       toolbar: !!b.querySelector('.lector-toolbar'),
       annotationLinks: b.querySelectorAll('.annotationLayer a').length,
       toolbarButtons: b.querySelectorAll('.lector-btn').length,
+      selectionBands: b.querySelectorAll('.lector-sel').length,
     };
   });
   console.log('panel state:', JSON.stringify(state, null, 1).slice(0, 800));
