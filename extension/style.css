@@ -1403,8 +1403,9 @@ body.pdf-panel-resizing .pdf-frame {
   color: var(--muted);
 }
 
-/* Minimal pdf.js text layer (scoped) — replaces pdf_viewer.css, whose global
-   :root/button/input rules restyled the whole page. */
+/* pdf.js text layer, scoped port of the official stylesheet (the global file
+   restyled the whole page; these are the load-bearing rules, including the
+   span sizing/scaleX calibration that keeps text boxes glyph-accurate). */
 .lector-root .textLayer {
   position: absolute;
   text-align: initial;
@@ -1418,6 +1419,9 @@ body.pdf-panel-resizing .pdf-frame {
   transform-origin: 0 0;
   caret-color: CanvasText;
   z-index: 0;
+  --min-font-size: 1;
+  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
+  --min-font-size-inv: calc(1 / var(--min-font-size));
 }
 
 .lector-root .textLayer :is(span, br) {
@@ -1428,7 +1432,25 @@ body.pdf-panel-resizing .pdf-frame {
   transform-origin: 0% 0%;
 }
 
+.lector-root .textLayer > :not(.markedContent),
+.lector-root .textLayer .markedContent span:not(.markedContent) {
+  z-index: 1;
+  --font-height: 0;
+  font-size: calc(var(--text-scale-factor) * var(--font-height));
+  --scale-x: 1;
+  --rotate: 0deg;
+  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
+}
+
+.lector-root .textLayer .markedContent {
+  display: contents;
+}
+
 .lector-root .textLayer ::selection {
+  background: transparent;
+}
+
+.lector-root .textLayer br::selection {
   background: transparent;
 }
 
@@ -1441,15 +1463,6 @@ body.pdf-panel-resizing .pdf-frame {
 .lector-sel {
   position: absolute;
   background: rgba(90, 122, 98, 0.22);
-}
-
-.lector-root .textLayer br::selection {
-  background: transparent;
-}
-
-.lector-root .textLayer span.markedContent {
-  top: 0;
-  height: 0;
 }
 
 /* ---- Lector full viewer chrome ---- */
