@@ -44,7 +44,13 @@ if (hasPanel === 'object') {
   await new Promise(r => setTimeout(r, 8000));
   const state = await page.evaluate(() => {
     const b = document.getElementById('pdfPanelBody');
-    return { html: b.innerHTML.slice(0, 400), canvases: b.querySelectorAll('canvas').length, textSpans: b.querySelectorAll('.textLayer span, [data-lector] span').length };
+    return {
+      canvases: b.querySelectorAll('canvas').length,
+      textSpans: b.querySelectorAll('.textLayer span').length,
+      toolbar: !!b.querySelector('.lector-toolbar'),
+      annotationLinks: b.querySelectorAll('.annotationLayer a').length,
+      toolbarButtons: b.querySelectorAll('.lector-btn').length,
+    };
   });
   console.log('panel state:', JSON.stringify(state, null, 1).slice(0, 800));
   await page.screenshot({ path: process.env.S + '/lector-test.png' });
