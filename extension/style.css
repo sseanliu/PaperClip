@@ -578,7 +578,7 @@ header {
   .paper-row {
     grid-template-columns: 18px 44px minmax(0, 1fr) minmax(0, 0.7fr) 118px;
   }
-  .paper-col-year,
+  .paper-row .paper-col-year,
   .paper-list-header > div:nth-child(5) {
     display: none;
   }
@@ -589,7 +589,9 @@ header {
   .paper-row {
     grid-template-columns: 18px 44px minmax(0, 1fr) 118px;
   }
-  .paper-col-authors,
+  /* .paper-row prefix outranks the base .paper-col-authors rule, whose
+     display: -webkit-box (line-clamp) appears later in the file. */
+  .paper-row .paper-col-authors,
   .paper-list-header > div:nth-child(4) {
     display: none;
   }
