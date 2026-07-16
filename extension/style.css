@@ -1342,3 +1342,24 @@ body.pdf-panel-resizing .pdf-frame {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
 }
+
+/* ---- Search shortcut hint (Cmd+K) ---- */
+.search-kbd {
+  position: absolute;
+  top: 50%;
+  right: 12px;
+  transform: translateY(-50%);
+  font-family: 'DM Sans', sans-serif;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  color: var(--muted);
+  background: var(--paper);
+  border: 1px solid var(--warm-gray);
+  border-radius: 5px;
+  padding: 3px 7px;
+  pointer-events: none;
+}
+
+.paper-search-wrap:focus-within .search-kbd {
+  display: none;
+}

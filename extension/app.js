@@ -1566,6 +1566,19 @@ function init() {
     });
   }
 
+  const isMac = navigator.platform.toLowerCase().includes('mac');
+  const searchKbd = document.getElementById('searchKbd');
+  if (searchKbd && !isMac) searchKbd.textContent = 'Ctrl K';
+  document.addEventListener('keydown', (e) => {
+    if (e.key.toLowerCase() !== 'k' || !(isMac ? e.metaKey : e.ctrlKey)) return;
+    if (e.altKey || e.shiftKey) return;
+    const search = document.getElementById('paperSearch');
+    if (!search) return;
+    e.preventDefault();
+    search.focus();
+    search.select();
+  });
+
   renderLibrary();
   renderSidebar();
   initSidebar();
