@@ -972,6 +972,8 @@ document.addEventListener('click', async (e) => {
   // Click anywhere else on the row: open the PDF side peek (or close it if
   // it's already showing this paper).
   if (window.PaperViewer) {
+    cursorId = id;
+    applyCursor();
     if (window.PaperViewer.isOpenFor(id)) return;
     const papers = await getPapers();
     const paper = papers[id];
@@ -1637,36 +1639,62 @@ function init() {
   const searchInput = document.getElementById('paperSearch');
   if (searchInput) {
     searchInput.addEventListener('input', () => { cursorId = null; });
-    searchInput.addEventListener('keydown', (e) => {
-      if (!renderedIds.length) return;
-      const idx = cursorId ? renderedIds.indexOf(cursorId) : -1;
-      const cols = galleryCols();
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        setCursorIndex(idx < 0 ? 0 : idx + cols);
-      } else if (e.key === 'ArrowUp') {
-        if (idx < 0) return;
-        e.preventDefault();
-        if (idx - cols < 0) clearCursor();
-        else setCursorIndex(idx - cols);
-      } else if (e.key === 'ArrowRight' && idx >= 0 && viewMode === 'gallery') {
-        e.preventDefault();
-        setCursorIndex(idx + 1);
-      } else if (e.key === 'ArrowLeft' && idx >= 0 && viewMode === 'gallery') {
-        e.preventDefault();
-        setCursorIndex(idx - 1);
-      } else if (e.key === 'Enter' && idx >= 0) {
-        e.preventDefault();
-        const title = document.querySelector(
-          `#paperList .paper-row[data-id="${CSS.escape(cursorId)}"] .paper-title-text`
-        );
-        if (title) title.click();
-      } else if (e.key === 'Escape' && idx >= 0) {
-        e.preventDefault();
-        clearCursor();
-      }
+  }
+
+  // Zone model: clicking the right panel focuses the (scrollable) PDF body,
+  // so arrow keys natively scroll the paper; clicking anywhere on the left
+  // drops focus back to the page, so arrows navigate the library again.
+  const pdfPanel = document.getElementById('pdfPanel');
+  const pdfPanelBody = document.getElementById('pdfPanelBody');
+  if (pdfPanel && pdfPanelBody) {
+    pdfPanel.addEventListener('pointerdown', () => {
+      pdfPanelBody.focus({ preventScroll: true });
     });
   }
+
+  // Results navigation. Active from the search field always, and from page
+  // scope once a paper is anchored (by arrows or by clicking a card) — so a
+  // manual click hands off to the keyboard seamlessly. Other inputs and the
+  // PDF panel keep their own key handling.
+  document.addEventListener('keydown', (e) => {
+    if (!renderedIds.length) return;
+    const t = e.target;
+    const inSearch = t === searchInput;
+    if (!inSearch) {
+      if (t && t.closest && t.closest('input, textarea, select, [contenteditable="true"], #pdfPanel')) return;
+      if (!cursorId) return;
+    }
+    const idx = cursorId ? renderedIds.indexOf(cursorId) : -1;
+    const cols = galleryCols();
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setCursorIndex(idx < 0 ? 0 : idx + cols);
+    } else if (e.key === 'ArrowUp') {
+      if (idx < 0) return;
+      e.preventDefault();
+      if (idx - cols < 0) {
+        clearCursor();
+        if (searchInput) searchInput.focus();
+      } else {
+        setCursorIndex(idx - cols);
+      }
+    } else if (e.key === 'ArrowRight' && idx >= 0 && viewMode === 'gallery') {
+      e.preventDefault();
+      setCursorIndex(idx + 1);
+    } else if (e.key === 'ArrowLeft' && idx >= 0 && viewMode === 'gallery') {
+      e.preventDefault();
+      setCursorIndex(idx - 1);
+    } else if (e.key === 'Enter' && idx >= 0) {
+      e.preventDefault();
+      const title = document.querySelector(
+        `#paperList .paper-row[data-id="${CSS.escape(cursorId)}"] .paper-title-text`
+      );
+      if (title) title.click();
+    } else if (e.key === 'Escape' && idx >= 0) {
+      e.preventDefault();
+      clearCursor();
+    }
+  });
 
   renderLibrary();
   renderSidebar();

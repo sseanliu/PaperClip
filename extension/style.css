@@ -1373,3 +1373,7 @@ body.pdf-panel-resizing .pdf-frame {
   border-color: var(--accent-sage);
   box-shadow: 0 0 0 3px rgba(90, 122, 98, 0.15);
 }
+
+.pdf-panel-body:focus {
+  outline: none;
+}
