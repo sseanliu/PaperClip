@@ -217,14 +217,29 @@ function paperMatchesActiveTag(p) {
   }
 }
 
+// Sort mode. 'added' orders by firstSeenAt (when the paper entered the
+// library); 'opened' orders by lastSeenAt (most recent visit). Persisted
+// across new-tab opens.
+const SORT_MODE_KEY = 'paperclip-sort-mode';
+let sortMode = localStorage.getItem(SORT_MODE_KEY) === 'opened' ? 'opened' : 'added';
+
+function setSortMode(mode) {
+  sortMode = mode === 'opened' ? 'opened' : 'added';
+  localStorage.setItem(SORT_MODE_KEY, sortMode);
+}
+
 function sortPapers(list) {
   // Starred papers go to the top. Within each group (starred and unstarred),
-  // sort by when the paper was first added to the library — newest first.
+  // sort by the active mode's timestamp — newest first. Each mode falls back
+  // to the other timestamp so entries missing a field don't sink to the bottom.
+  const key = sortMode === 'opened'
+    ? (p) => p.lastSeenAt || p.firstSeenAt || ''
+    : (p) => p.firstSeenAt || p.lastSeenAt || '';
   return list.slice().sort((a, b) => {
     const aStar = a.starred ? 1 : 0;
     const bStar = b.starred ? 1 : 0;
     if (aStar !== bStar) return bStar - aStar;
-    return (b.firstSeenAt || '').localeCompare(a.firstSeenAt || '');
+    return key(b).localeCompare(key(a));
   });
 }
 
@@ -1452,6 +1467,16 @@ function init() {
   const date = document.getElementById('dateDisplay');
   if (greeting) greeting.textContent = getGreeting();
   if (date) date.textContent = getDateDisplay();
+  const sortSelect = document.getElementById('paperSort');
+  if (sortSelect) {
+    sortSelect.value = sortMode;
+    sortSelect.addEventListener('change', () => {
+      setSortMode(sortSelect.value);
+      const search = document.getElementById('paperSearch');
+      renderLibrary(search ? search.value : '');
+    });
+  }
+
   renderLibrary();
   renderSidebar();
   initSidebar();
