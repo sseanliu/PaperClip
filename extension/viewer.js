@@ -139,7 +139,7 @@ async function open(paper) {
     bodyEl.classList.add('is-frame');
     const frame = document.createElement('iframe');
     frame.className = 'pdf-frame';
-    frame.src = url;
+    frame.src = url + (url.includes('#') ? '&' : '#') + 'view=FitH';
     frame.title = titleEl.textContent;
     bodyEl.appendChild(frame);
     return;
