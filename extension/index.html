@@ -100,6 +100,24 @@
 
 </div>
 
+<!-- PDF side peek (Notion-style) -->
+<aside id="pdfPanel" class="pdf-panel" hidden>
+  <div class="pdf-panel-header">
+    <div class="pdf-panel-title" id="pdfPanelTitle"></div>
+    <button class="pdf-panel-btn" id="pdfPanelOpenTab" title="Open in a tab" aria-label="Open in a tab">
+      <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>
+      </svg>
+    </button>
+    <button class="pdf-panel-btn" id="pdfPanelClose" title="Close" aria-label="Close">
+      <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
+      </svg>
+    </button>
+  </div>
+  <div class="pdf-panel-body" id="pdfPanelBody"></div>
+</aside>
+
 <div class="selection-bar" id="selectionBar" hidden>
   <span class="selection-count" id="selectionCount">0 selected</span>
   <button class="selection-btn" data-selection-action="copy" id="selectionCopyBtn">Copy</button>
@@ -112,5 +130,7 @@
 <script src="app.js"></script>
 <!-- First-page thumbnail renderer (PDF.js, ES module) -->
 <script type="module" src="thumbs.js"></script>
+<!-- PDF side-peek viewer -->
+<script type="module" src="viewer.js"></script>
 </body>
 </html>

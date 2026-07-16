@@ -394,6 +394,15 @@ function renderRow(p, openMap, thumb) {
             <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
           </svg>
         </button>
+        <button class="paper-icon-btn paper-expand-btn"
+                data-action="toggle-expand"
+                title="${isExpanded ? 'Hide details' : 'Show details'}"
+                aria-label="${isExpanded ? 'Hide details' : 'Show details'}"
+                aria-expanded="${isExpanded}">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="transform: rotate(${isExpanded ? 180 : 0}deg)">
+            <path d="m6 9 6 6 6-6"/>
+          </svg>
+        </button>
         <button class="paper-icon-btn paper-copy-btn"
                 data-action="copy-single"
                 title="${justCopied ? 'Copied' : "Copy this paper's data"}"
@@ -796,6 +805,14 @@ document.addEventListener('click', async (e) => {
       renderLibrary(search ? search.value : '');
       return;
     }
+    if (action === 'toggle-expand') {
+      const id = row.dataset.id;
+      if (expandedIds.has(id)) expandedIds.delete(id);
+      else expandedIds.add(id);
+      const search = document.getElementById('paperSearch');
+      renderLibrary(search ? search.value : '');
+      return;
+    }
     if (action === 'delete') {
       await deletePaper(row.dataset.id);
       return;
@@ -843,14 +860,17 @@ document.addEventListener('click', async (e) => {
     return;
   }
 
-  if (expandedIds.has(id)) {
-    expandedIds.delete(id);
-  } else {
-    expandedIds.add(id);
+  // Click anywhere else on the row: open the PDF side peek (or close it if
+  // it's already showing this paper).
+  if (window.PaperViewer) {
+    if (window.PaperViewer.isOpenFor(id)) {
+      window.PaperViewer.close();
+    } else {
+      const papers = await getPapers();
+      const paper = papers[id];
+      if (paper) window.PaperViewer.open(paper);
+    }
   }
-
-  const search = document.getElementById('paperSearch');
-  renderLibrary(search ? search.value : '');
 });
 
 // Coalesce rapid re-render triggers (storage writes during enrichment, tab

@@ -23,7 +23,7 @@ const TARGET_WIDTH = 280; // 2x of the ~140px max display size
 const THROTTLE_MS = 800;
 
 /** Resolve a fetchable PDF URL for a paper, or null if we don't know one. */
-function pdfUrlFor(p) {
+export function pdfUrlFor(p) {
   if (!p) return null;
   if (p.source === 'arxiv' && p.sourceId) return `https://arxiv.org/pdf/${p.sourceId}`;
   if (p.source === 'openreview' && p.sourceId) return `https://openreview.net/pdf?id=${encodeURIComponent(p.sourceId)}`;
