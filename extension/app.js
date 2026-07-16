@@ -229,6 +229,24 @@ function setSortMode(mode) {
   localStorage.setItem(SORT_MODE_KEY, sortMode);
 }
 
+// View mode. 'list' is the table layout; 'gallery' is a cover grid where each
+// card shows the first-page thumbnail with the title underneath. Persisted
+// across new-tab opens.
+const VIEW_MODE_KEY = 'paperclip-view-mode';
+let viewMode = localStorage.getItem(VIEW_MODE_KEY) === 'gallery' ? 'gallery' : 'list';
+
+function setViewMode(mode) {
+  viewMode = mode === 'gallery' ? 'gallery' : 'list';
+  localStorage.setItem(VIEW_MODE_KEY, viewMode);
+  const toggle = document.getElementById('viewToggle');
+  if (!toggle) return;
+  for (const btn of toggle.querySelectorAll('[data-view]')) {
+    const active = btn.dataset.view === viewMode;
+    btn.classList.toggle('is-active', active);
+    btn.setAttribute('aria-pressed', String(active));
+  }
+}
+
 function sortPapers(list) {
   // Sort by the active mode's timestamp — newest first. Each mode falls back
   // to the other timestamp so entries missing a field don't sink to the bottom.
@@ -432,6 +450,39 @@ function renderRow(p, openMap, thumb) {
   `;
 }
 
+// Gallery card: cover thumbnail with the title underneath. Reuses the
+// .paper-row class so the delegated click handlers work unchanged (title
+// click opens the paper, cover click opens the side peek).
+function renderCard(p, openMap, thumb) {
+  const open = openMap.get(p.id);
+  const title = displayTitle(p);
+
+  const classes = ['paper-row', 'paper-card'];
+  if (open) classes.push('is-open');
+  if (p.starred) classes.push('is-starred');
+
+  return `
+    <div class="${classes.join(' ')}"
+         data-id="${escapeHtml(p.id)}"
+         data-url="${escapeHtml(p.url)}"
+         ${open ? `data-tab-id="${open.id}" data-window-id="${open.windowId}"` : ''}>
+      <div class="paper-card-cover">
+        ${thumb
+          ? `<img class="paper-card-thumb" src="${thumb}" alt="" loading="lazy">`
+          : '<div class="paper-card-thumb-placeholder"></div>'}
+        ${p.starred
+          ? `<span class="paper-card-star">
+               <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+                 <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+               </svg>
+             </span>`
+          : ''}
+      </div>
+      <div class="paper-card-title paper-title-text" title="${escapeHtml(title)}">${escapeHtml(title)}</div>
+    </div>
+  `;
+}
+
 async function renderSidebar() {
   const nav = document.getElementById('sidebarNav');
   if (!nav) return;
@@ -554,13 +605,16 @@ async function renderLibrary(filter = '') {
   }
 
   emptyEl.style.display = 'none';
-  if (header) header.style.display = 'grid';
+  const gallery = viewMode === 'gallery';
+  list.classList.toggle('is-gallery', gallery);
+  if (header) header.style.display = gallery ? 'none' : 'grid';
   const isFiltered = q || activeFilter.type !== 'all';
   countEl.textContent = isFiltered
     ? `${sorted.length} of ${all.length}`
     : `${all.length} paper${all.length === 1 ? '' : 's'}`;
   const thumbs = await chrome.storage.local.get(sorted.map(p => THUMB_PREFIX + p.id));
-  list.innerHTML = sorted.map(p => renderRow(p, openMap, thumbs[THUMB_PREFIX + p.id])).join('');
+  const render = gallery ? renderCard : renderRow;
+  list.innerHTML = sorted.map(p => render(p, openMap, thumbs[THUMB_PREFIX + p.id])).join('');
 
   // Drop selections that no longer exist (e.g. after delete)
   const valid = new Set(all.map(p => p.id));
@@ -1498,6 +1552,18 @@ function init() {
     sortSelect.value = sortMode;
     sortSelect.addEventListener('change', () => {
       setSortMode(sortSelect.value);
+      const search = document.getElementById('paperSearch');
+      renderLibrary(search ? search.value : '');
+    });
+  }
+
+  const viewToggle = document.getElementById('viewToggle');
+  if (viewToggle) {
+    setViewMode(viewMode);
+    viewToggle.addEventListener('click', (e) => {
+      const btn = e.target.closest('[data-view]');
+      if (!btn || btn.dataset.view === viewMode) return;
+      setViewMode(btn.dataset.view);
       const search = document.getElementById('paperSearch');
       renderLibrary(search ? search.value : '');
     });

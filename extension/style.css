@@ -1225,3 +1225,120 @@ body.pdf-panel-resizing .pdf-frame {
 .pdf-panel-fallback-btn:hover {
   border-color: var(--accent-sage);
 }
+
+/* ---- View toggle (list / gallery) ---- */
+.view-toggle {
+  display: flex;
+  align-items: stretch;
+  border: 1px solid var(--warm-gray);
+  border-radius: 8px;
+  background: var(--card-bg);
+  overflow: hidden;
+}
+
+.view-toggle-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.view-toggle-btn + .view-toggle-btn {
+  border-left: 1px solid var(--warm-gray);
+}
+
+.view-toggle-btn:hover {
+  color: var(--ink);
+}
+
+.view-toggle-btn.is-active {
+  background: var(--paper);
+  color: var(--ink);
+}
+
+/* ---- Gallery view ---- */
+.paper-list.is-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 26px 20px;
+  padding: 18px 2px;
+}
+
+.paper-list.is-gallery .paper-row {
+  display: block;
+  padding: 0;
+  border-bottom: none;
+}
+
+.paper-list.is-gallery .paper-row:hover {
+  background: transparent;
+}
+
+.paper-card-cover {
+  position: relative;
+  aspect-ratio: 3 / 4;
+  border: 1px solid var(--warm-gray);
+  border-radius: 6px;
+  background: var(--card-bg);
+  overflow: hidden;
+  box-shadow: 0 1px 3px var(--shadow);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.paper-card:hover .paper-card-cover {
+  border-color: var(--muted);
+  box-shadow: 0 3px 10px var(--shadow);
+}
+
+.paper-card.is-open .paper-card-cover {
+  border-color: var(--accent-sage);
+}
+
+.paper-card-thumb {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top;
+}
+
+.paper-card-thumb-placeholder {
+  position: absolute;
+  inset: 6px;
+  border: 1px dashed var(--warm-gray);
+  border-radius: 4px;
+}
+
+.paper-card-star {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-amber);
+  background: var(--card-bg);
+  border: 1px solid var(--warm-gray);
+  border-radius: 50%;
+}
+
+.paper-card-title {
+  margin-top: 8px;
+  font-family: 'Newsreader', serif;
+  font-size: 14px;
+  line-height: 1.35;
+  color: var(--ink);
+  letter-spacing: -0.1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
