@@ -59,16 +59,28 @@ function looksLikeUrlOrFilename(s) {
 }
 
 /**
+ * Interstitial / error pages (Cloudflare challenges, rate-limit walls) whose
+ * tab title would otherwise be stored as the paper's "title".
+ */
+function looksLikeErrorPage(s) {
+  const t = (s || '').trim();
+  if (!t) return false;
+  if (/\b(just a moment|attention required|access denied|temporarily unavailable|checking your browser|verify you are human|page not found|security check|rate limit)\b/i.test(t)) return true;
+  if (/^(400|401|403|404|408|429|500|502|503)\b/.test(t)) return true;
+  return false;
+}
+
+/**
  * Fallback title cleanup for when enrichment hasn't run yet. Trims trailing
  * site-name garbage like " - arXiv" or " | OpenReview", and rejects titles
- * that are just the URL.
+ * that are just the URL or an interstitial/error page.
  */
 function fallbackTitle(rawTitle, cls) {
   const cleaned = (rawTitle || '')
     .replace(/\s*[-|–—]\s*(arXiv|OpenReview|bioRxiv|medRxiv|ACM Digital Library|IEEE Xplore|Springer|Nature|Science|NeurIPS|ACL Anthology|Semantic Scholar).*$/i, '')
     .replace(/\s+/g, ' ')
     .trim();
-  if (cleaned && !looksLikeUrlOrFilename(cleaned)) return cleaned;
+  if (cleaned && !looksLikeUrlOrFilename(cleaned) && !looksLikeErrorPage(cleaned)) return cleaned;
   // Build a friendly placeholder from the classification, if available
   if (cls && cls.sourceId) {
     const label = SOURCE_LABELS[cls.source] || cls.source;
@@ -498,12 +510,31 @@ async function reclassifyGenericPdfs() {
   if (changed) await chrome.storage.local.set({ [PAPERS_KEY]: papers });
 }
 
+/**
+ * Clear stored titles that are really interstitial/error pages captured
+ * before looksLikeErrorPage existed, so the next visit / enrichment can
+ * fill in a real one.
+ */
+async function cleanupJunkTitles() {
+  const store = await chrome.storage.local.get(PAPERS_KEY);
+  const papers = store[PAPERS_KEY] || {};
+  let changed = false;
+  for (const p of Object.values(papers)) {
+    if (p.title && looksLikeErrorPage(p.title)) {
+      p.title = null;
+      changed = true;
+    }
+  }
+  if (changed) await chrome.storage.local.set({ [PAPERS_KEY]: papers });
+}
+
 // ─── Event listeners ──────────────────────────────────────────────────────────
 
 chrome.runtime.onInstalled.addListener(async () => {
   updateBadge();
   await backfillExistingTabs();
   await reclassifyGenericPdfs();
+  await cleanupJunkTitles();
   retryStuckEnrichments();
 });
 
@@ -511,6 +542,7 @@ chrome.runtime.onStartup.addListener(async () => {
   updateBadge();
   await backfillExistingTabs();
   await reclassifyGenericPdfs();
+  await cleanupJunkTitles();
   retryStuckEnrichments();
 });
 
