@@ -1648,7 +1648,8 @@ function init() {
   const pdfPanelBody = document.getElementById('pdfPanelBody');
   if (pdfPanel && pdfPanelBody) {
     pdfPanel.addEventListener('pointerdown', () => {
-      pdfPanelBody.focus({ preventScroll: true });
+      const lectorRoot = document.getElementById('lectorRoot');
+      (lectorRoot || pdfPanelBody).focus({ preventScroll: true });
     });
   }
 

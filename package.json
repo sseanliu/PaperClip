@@ -1,0 +1,17 @@
+{
+  "name": "paperclip",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:panel": "esbuild panel/main.jsx --bundle --format=esm --minify --loader:.svg=empty --loader:.gif=empty --loader:.png=empty --loader:.cur=empty --outfile=extension/vendor/lector-panel.js && cp node_modules/pdfjs-dist/build/pdf.worker.min.mjs extension/vendor/lector-pdf.worker.min.mjs"
+  },
+  "dependencies": {
+    "@anaralabs/lector": "latest",
+    "pdfjs-dist": "^5.5.207",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.0"
+  }
+}

@@ -32,8 +32,19 @@ function els() {
   return panel && titleEl && bodyEl && openTabBtn;
 }
 
+let lectorHolder = null;
+
+function teardownLector() {
+  if (lectorHolder) {
+    if (window.LectorPanel) window.LectorPanel.unmount(lectorHolder);
+    lectorHolder = null;
+  }
+  bodyEl && bodyEl.classList.remove('is-lector');
+}
+
 async function teardownDoc() {
   renderGeneration++;
+  teardownLector();
   if (pageObserver) {
     pageObserver.disconnect();
     pageObserver = null;
@@ -129,7 +140,31 @@ async function open(paper) {
 
   showMessage('Loading PDF…');
 
-  // Preferred path: embed the PDF URL directly so the user's own PDF viewer
+  // Preferred path: the Lector viewer (headless pdf.js primitives) - fully
+  // controlled, fit-to-width from first paint, real text selection. Falls
+  // back to the iframe embed if it errors (e.g. cross-origin fetch refused).
+  if (window.LectorPanel) {
+    if (generation !== renderGeneration) return;
+    bodyEl.innerHTML = '';
+    bodyEl.classList.add('is-lector');
+    const holder = document.createElement('div');
+    holder.className = 'lector-holder';
+    bodyEl.appendChild(holder);
+    lectorHolder = holder;
+    window.LectorPanel.mount(holder, url, {
+      onError: () => {
+        if (generation !== renderGeneration) return;
+        teardownLector();
+        openFrameOrCanvas(url, generation);
+      },
+    });
+    return;
+  }
+  openFrameOrCanvas(url, generation);
+}
+
+async function openFrameOrCanvas(url, generation) {
+  // Iframe path: embed the PDF URL directly so the user's own PDF viewer
   // (Chrome's built-in, Google Scholar PDF Reader, …) handles it — same as
   // Overleaf's preview pane. Fall back to our PDF.js renderer only when the
   // site forbids framing.
@@ -155,7 +190,7 @@ async function open(paper) {
     });
     doc = await task.promise;
   } catch (err) {
-    console.warn('[paperclip] pdf preview failed', paper.id, err && err.message);
+    console.warn('[paperclip] pdf preview failed', url, err && err.message);
     if (generation === renderGeneration) {
       showMessage("Couldn't load this PDF here.", url);
     }

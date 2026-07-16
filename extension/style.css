@@ -1377,3 +1377,29 @@ body.pdf-panel-resizing .pdf-frame {
 .pdf-panel-body:focus {
   outline: none;
 }
+
+/* ---- Lector viewer mode ---- */
+.pdf-panel-body.is-lector {
+  padding: 0;
+  overflow: hidden;
+}
+
+.lector-holder,
+.lector-root,
+.lector-pages {
+  height: 100%;
+  width: 100%;
+}
+
+.lector-root {
+  overflow: auto;
+  background: #efeae3;
+  outline: none;
+}
+
+.lector-loading {
+  padding: 24px;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 13px;
+  color: var(--muted);
+}
