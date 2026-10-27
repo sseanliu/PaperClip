@@ -4,36 +4,138 @@
  * Runs in the new-tab page as an ES module. For each paper that has a
  * reachable PDF URL and no cached thumbnail, fetches the PDF (PDF.js uses
  * range requests, so only the bytes needed for page 1 are downloaded when
- * the server supports them), renders page 1 to a small canvas, and caches
- * the JPEG data URL in chrome.storage.local under `thumb:<paperId>`.
+ * the server supports them), renders page 1 to a canvas, and stores two WebP
+ * blobs in IndexedDB: `small` for list rows and `large` for gallery covers.
  *
- * app.js reads those keys when rendering rows; its storage.onChanged
- * listener re-renders as thumbnails land.
+ * Blobs stay on disk until an <img> shows them, so a page holds object URLs
+ * rather than ~90 KB base64 strings per paper. Only one open page works the
+ * queue at a time (Web Lock); pages hear about new thumbnails over a
+ * BroadcastChannel and load just those records.
+ *
+ * app.js reads window.PaperThumbs: ready, urlFor(id, size), onChange(fn).
  */
 
 import * as pdfjsLib from './vendor/pdf.min.mjs';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = './vendor/pdf.worker.min.mjs';
 
-const THUMB_PREFIX = 'thumb:';
-const FAIL_PREFIX = 'thumbfail:';
 const FAIL_RETRY_MS = 7 * 24 * 60 * 60 * 1000; // retry failures after a week
-const TARGET_WIDTH = 480; // 2x of the ~240px max display size (gallery cards)
+const LARGE_WIDTH = 480; // 2x of the ~240px max display size (gallery cards)
+const SMALL_WIDTH = 120; // list rows show 44px-wide thumbnails
 const THROTTLE_MS = 800;
 
 // Bump to invalidate every cached thumbnail (e.g. after a size change); the
-// queue then re-renders them all at the current TARGET_WIDTH.
-const THUMB_VERSION = 2;
-const THUMB_VERSION_KEY = 'thumbver';
+// queue then re-renders them all.
+const THUMB_VERSION = 3;
 
-async function sweepStaleVersion() {
-  const store = await chrome.storage.local.get(THUMB_VERSION_KEY);
-  if (store[THUMB_VERSION_KEY] === THUMB_VERSION) return;
-  const all = await chrome.storage.local.get(null);
-  const stale = Object.keys(all).filter(k => k.startsWith(THUMB_PREFIX) || k.startsWith(FAIL_PREFIX));
-  if (stale.length) await chrome.storage.local.remove(stale);
-  await chrome.storage.local.set({ [THUMB_VERSION_KEY]: THUMB_VERSION });
+// Thumbnails up to version 2 lived in chrome.storage.local as JPEG data URLs.
+const LEGACY_THUMB_PREFIX = 'thumb:';
+const LEGACY_FAIL_PREFIX = 'thumbfail:';
+const LEGACY_VERSION_KEY = 'thumbver';
+
+// ─── IndexedDB ──────────────────────────────────────────────────────────────
+
+const DB_NAME = 'paperclip';
+const STORE = 'thumbs'; // { id, v, small?: Blob, large?: Blob, failedAt?: number }
+
+function req(r) {
+  return new Promise((resolve, reject) => {
+    r.onsuccess = () => resolve(r.result);
+    r.onerror = () => reject(r.error);
+  });
 }
+
+const dbPromise = (() => {
+  const r = indexedDB.open(DB_NAME, 1);
+  r.onupgradeneeded = () => r.result.createObjectStore(STORE, { keyPath: 'id' });
+  return req(r);
+})();
+
+async function objectStore(mode) {
+  return (await dbPromise).transaction(STORE, mode).objectStore(STORE);
+}
+
+async function getRecord(id) {
+  return req((await objectStore('readonly')).get(id));
+}
+
+async function getAllRecords() {
+  return req((await objectStore('readonly')).getAll());
+}
+
+async function putRecord(rec) {
+  return req((await objectStore('readwrite')).put(rec));
+}
+
+async function deleteRecords(ids) {
+  const s = await objectStore('readwrite');
+  await Promise.all(ids.map(id => req(s.delete(id))));
+}
+
+// ─── Object URLs for this page ──────────────────────────────────────────────
+
+const urls = new Map(); // paperId → { small?: string, large?: string }
+const listeners = new Set();
+const channel = new BroadcastChannel('paperclip-thumbs');
+
+function setUrls(id, rec) {
+  const old = urls.get(id);
+  if (old) {
+    if (old.small) URL.revokeObjectURL(old.small);
+    if (old.large) URL.revokeObjectURL(old.large);
+    urls.delete(id);
+  }
+  if (rec && (rec.small || rec.large)) {
+    urls.set(id, {
+      small: rec.small ? URL.createObjectURL(rec.small) : undefined,
+      large: rec.large ? URL.createObjectURL(rec.large) : undefined,
+    });
+  }
+}
+
+function notify(ids) {
+  for (const fn of listeners) {
+    try { fn(ids); } catch (err) { console.warn('[paperclip] thumbs listener', err); }
+  }
+}
+
+// Record this page's own writes and tell the other pages.
+function announce(ids, recs) {
+  ids.forEach((id, i) => setUrls(id, recs[i]));
+  channel.postMessage({ ids });
+  notify(ids);
+}
+
+channel.onmessage = async (e) => {
+  const ids = (e.data && e.data.ids) || [];
+  for (const id of ids) setUrls(id, await getRecord(id));
+  notify(ids);
+};
+
+const ready = (async () => {
+  try {
+    for (const rec of await getAllRecords()) setUrls(rec.id, rec);
+  } catch (err) {
+    console.warn('[paperclip] could not load thumbnails', err);
+  }
+})();
+
+window.PaperThumbs = {
+  ready,
+  /** Object URL for a paper's thumbnail; size is 'small' or 'large'. */
+  urlFor(id, size = 'small') {
+    const u = urls.get(id);
+    if (!u) return undefined;
+    return size === 'large' ? (u.large || u.small) : (u.small || u.large);
+  },
+  /** Subscribe to thumbnail changes; fn receives the changed paper IDs. */
+  onChange(fn) {
+    listeners.add(fn);
+    return () => listeners.delete(fn);
+  },
+};
+
+// ─── Rendering ──────────────────────────────────────────────────────────────
 
 /** Resolve a fetchable PDF URL for a paper, or null if we don't know one. */
 export function pdfUrlFor(p) {
@@ -48,6 +150,14 @@ export function pdfUrlFor(p) {
   return null;
 }
 
+async function shrink(source) {
+  const bmp = await createImageBitmap(source, { resizeWidth: SMALL_WIDTH, resizeQuality: 'high' });
+  const canvas = new OffscreenCanvas(bmp.width, bmp.height);
+  canvas.getContext('2d').drawImage(bmp, 0, 0);
+  bmp.close();
+  return canvas.convertToBlob({ type: 'image/webp', quality: 0.8 });
+}
+
 async function renderFirstPage(pdfUrl) {
   const task = pdfjsLib.getDocument({
     url: pdfUrl,
@@ -58,7 +168,7 @@ async function renderFirstPage(pdfUrl) {
     const doc = await task.promise;
     const page = await doc.getPage(1);
     const base = page.getViewport({ scale: 1 });
-    const viewport = page.getViewport({ scale: TARGET_WIDTH / base.width });
+    const viewport = page.getViewport({ scale: LARGE_WIDTH / base.width });
 
     const canvas = document.createElement('canvas');
     canvas.width = Math.ceil(viewport.width);
@@ -68,55 +178,99 @@ async function renderFirstPage(pdfUrl) {
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     await page.render({ canvasContext: ctx, viewport }).promise;
-    return canvas.toDataURL('image/jpeg', 0.8);
+    const large = await new Promise(r => canvas.toBlob(r, 'image/webp', 0.8));
+    const small = await shrink(canvas);
+    return { large, small };
   } finally {
     try { await task.destroy(); } catch {}
   }
 }
 
-/** Remove thumb/fail keys whose paper no longer exists (deleted or merged). */
-async function pruneOrphans(papers) {
-  const all = await chrome.storage.local.get(null);
-  const stale = Object.keys(all).filter(k => {
-    if (k.startsWith(THUMB_PREFIX)) return !papers[k.slice(THUMB_PREFIX.length)];
-    if (k.startsWith(FAIL_PREFIX)) return !papers[k.slice(FAIL_PREFIX.length)];
-    return false;
-  });
-  if (stale.length) await chrome.storage.local.remove(stale);
+/**
+ * Move version-2 thumbnails (data URLs in chrome.storage.local) into
+ * IndexedDB, keeping the existing 480px JPEG as the large image, then drop
+ * the old keys. One that can't be decoded gets a record with failedAt 0, so
+ * the queue re-renders it from the PDF instead of losing it.
+ */
+async function migrateLegacy() {
+  const keys = (await chrome.storage.local.getKeys()).filter(k =>
+    k.startsWith(LEGACY_THUMB_PREFIX) || k.startsWith(LEGACY_FAIL_PREFIX) || k === LEGACY_VERSION_KEY);
+  for (let i = 0; i < keys.length; i += 25) {
+    const batch = keys.slice(i, i + 25);
+    const got = await chrome.storage.local.get(batch);
+    const ids = [];
+    const recs = [];
+    for (const [k, v] of Object.entries(got)) {
+      let rec = null;
+      if (k.startsWith(LEGACY_THUMB_PREFIX) && typeof v === 'string') {
+        const id = k.slice(LEGACY_THUMB_PREFIX.length);
+        try {
+          const large = await (await fetch(v)).blob();
+          rec = { id, v: THUMB_VERSION, large, small: await shrink(large) };
+        } catch (err) {
+          console.warn('[paperclip] could not migrate thumbnail', k, err && err.message);
+          rec = { id, v: THUMB_VERSION, failedAt: 0 };
+        }
+      } else if (k.startsWith(LEGACY_FAIL_PREFIX) && typeof v === 'number') {
+        rec = { id: k.slice(LEGACY_FAIL_PREFIX.length), v: THUMB_VERSION, failedAt: v };
+      }
+      if (!rec) continue;
+      await putRecord(rec);
+      ids.push(rec.id);
+      recs.push(rec);
+    }
+    await chrome.storage.local.remove(batch);
+    if (ids.length) announce(ids, recs);
+  }
 }
 
 let running = false;
 let rerunRequested = false;
 
+async function workQueue() {
+  await migrateLegacy();
+  const papers = await PaperStore.all();
+  const records = new Map((await getAllRecords()).map(r => [r.id, r]));
+
+  // Remove thumbnails whose paper no longer exists (deleted or merged).
+  const orphans = [...records.keys()].filter(id => !papers.has(id));
+  if (orphans.length) {
+    await deleteRecords(orphans);
+    announce(orphans, orphans.map(() => null));
+  }
+
+  for (const p of [...papers.values()]) {
+    const url = pdfUrlFor(p);
+    if (!url) continue;
+    const rec = records.get(p.id);
+    if (rec && rec.v === THUMB_VERSION) {
+      if (rec.small || rec.large) continue;
+      if (rec.failedAt && Date.now() - rec.failedAt < FAIL_RETRY_MS) continue;
+    }
+
+    let next;
+    try {
+      next = { id: p.id, v: THUMB_VERSION, ...(await renderFirstPage(url)) };
+    } catch (err) {
+      console.warn('[paperclip] thumbnail failed', p.id, err && err.message);
+      next = { id: p.id, v: THUMB_VERSION, failedAt: Date.now() };
+    }
+    await putRecord(next);
+    announce([p.id], [next]);
+    await new Promise(r => setTimeout(r, THROTTLE_MS));
+  }
+}
+
 async function processQueue() {
   if (running) { rerunRequested = true; return; }
   running = true;
   try {
-    await sweepStaleVersion();
-    const papers = await PaperStore.toObject();
-    await pruneOrphans(papers);
-
-    for (const p of Object.values(papers)) {
-      const url = pdfUrlFor(p);
-      if (!url) continue;
-
-      const thumbKey = THUMB_PREFIX + p.id;
-      const failKey = FAIL_PREFIX + p.id;
-      const cached = await chrome.storage.local.get([thumbKey, failKey]);
-      if (cached[thumbKey]) continue;
-      const failedAt = cached[failKey];
-      if (failedAt && Date.now() - failedAt < FAIL_RETRY_MS) continue;
-
-      try {
-        const dataUrl = await renderFirstPage(url);
-        await chrome.storage.local.set({ [thumbKey]: dataUrl });
-        await chrome.storage.local.remove(failKey);
-      } catch (err) {
-        console.warn('[paperclip] thumbnail failed', p.id, err && err.message);
-        await chrome.storage.local.set({ [failKey]: Date.now() });
-      }
-      await new Promise(r => setTimeout(r, THROTTLE_MS));
-    }
+    // Another open new-tab page may already be working the queue.
+    await navigator.locks.request('paperclip-thumbs', { ifAvailable: true }, async (lock) => {
+      if (lock) await workQueue();
+    });
+  } catch (err) {
+    console.warn('[paperclip] thumbnail queue', err);
   } finally {
     running = false;
     if (rerunRequested) {

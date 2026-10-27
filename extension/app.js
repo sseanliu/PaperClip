@@ -384,8 +384,6 @@ function renderDetail(p) {
 
 // ─── Rendering ────────────────────────────────────────────────────────────────
 
-const THUMB_PREFIX = 'thumb:';
-
 function renderRow(p, openMap, thumb) {
   const open = openMap.get(p.id);
   const isOpen = !!open;
@@ -671,9 +669,12 @@ async function renderLibrary(filter = '') {
   countEl.textContent = isFiltered
     ? `${sorted.length} of ${all.length}`
     : `${all.length} paper${all.length === 1 ? '' : 's'}`;
-  const thumbs = await chrome.storage.local.get(sorted.map(p => THUMB_PREFIX + p.id));
+  // Thumbnails come from thumbs.js (IndexedDB blobs as object URLs).
+  const thumbs = window.PaperThumbs;
+  if (thumbs) await thumbs.ready;
+  const size = gallery ? 'large' : 'small';
   const render = gallery ? renderCard : renderRow;
-  list.innerHTML = sorted.map(p => render(p, openMap, thumbs[THUMB_PREFIX + p.id])).join('');
+  list.innerHTML = sorted.map(p => render(p, openMap, thumbs && thumbs.urlFor(p.id, size))).join('');
   applyCursor();
 
   // Drop selections that no longer exist (e.g. after delete)
@@ -1059,13 +1060,9 @@ document.addEventListener('input', (e) => {
   }
 });
 
-// Re-render whenever the service worker writes new papers / enrichment,
-// or the thumbnail renderer caches a new first-page image.
+// Re-render whenever the service worker writes new papers / enrichment.
+// Thumbnail arrivals are wired up in init(), once thumbs.js has loaded.
 PaperStore.onChange(() => scheduleRender(150));
-chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== 'local') return;
-  if (Object.keys(changes).some(k => k.startsWith(THUMB_PREFIX))) scheduleRender(150);
-});
 
 // Re-render on tab open/close so the open-status dots stay accurate.
 if (chrome.tabs && chrome.tabs.onCreated && chrome.tabs.onRemoved) {
@@ -1751,6 +1748,8 @@ function init() {
       clearCursor();
     }
   });
+
+  if (window.PaperThumbs) window.PaperThumbs.onChange(() => scheduleRender(150));
 
   renderLibrary();
   renderSidebar();
