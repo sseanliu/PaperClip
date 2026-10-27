@@ -174,17 +174,19 @@ async function capturePaper(tab, mode = 'visit') {
     didMutate = true;
   }
 
+  const isFreshVisit = mode === 'visit' && tab.id != null && lastCapturedByTab.get(tab.id) !== cls.canonicalId;
   if (tab.id != null) lastCapturedByTab.set(tab.id, cls.canonicalId);
   if (!didMutate) return;
 
   await chrome.storage.local.set({ [PAPERS_KEY]: papers });
 
-  // Kick off metadata enrichment for new entries (or retry if previously failed).
+  // Kick off metadata enrichment for new entries. A failed entry retries on
+  // its backoff schedule, or right away when the user opens the paper again.
   // Use the stored entry's id, which may differ from cls.canonicalId when this
   // URL points to a merged record under a different primary key.
   const paper = existing || papers[cls.canonicalId];
-  if (paper && paper.enrichmentStatus !== 'ok' && paper.enrichmentStatus !== 'unsupported') {
-    scheduleEnrichment(paper.id);
+  if (paper && (needsEnrichment(paper) || (isFreshVisit && paper.enrichmentStatus === 'failed'))) {
+    scheduleEnrichment(paper.id, { force: isFreshVisit });
   }
 }
 
@@ -295,15 +297,33 @@ const ENRICH_THROTTLE_MS = 900;
 // retryStuckEnrichments() re-runs anything below the current version.
 const ENRICHMENT_VERSION = 2;
 
+// Failed lookups back off instead of retrying on every service-worker wake:
+// attempt N waits ENRICH_RETRY_DELAYS_MS[N-1], and after the last step the
+// entry stays 'failed' until the user opens the paper again. Some sources
+// fail permanently (OpenReview answers 403 challenge pages to API calls), and
+// every retry rewrites the stored entry.
+const ENRICH_RETRY_DELAYS_MS = [1, 6, 24, 72].map(h => h * 3600 * 1000);
+
+function needsEnrichment(p, now = Date.now()) {
+  const isCurrent = (p.enrichmentVersion || 0) >= ENRICHMENT_VERSION;
+  if (p.enrichmentStatus === 'pending') return true;
+  if (p.enrichmentStatus === 'failed') {
+    // Entries that failed before backoff existed have no schedule yet.
+    if (p.nextEnrichAt === undefined) return true;
+    return p.nextEnrichAt !== null && now >= p.nextEnrichAt;
+  }
+  return !isCurrent;
+}
+
 const enrichQueued = new Set();
 let enrichChain = Promise.resolve();
 
-function scheduleEnrichment(canonicalId) {
+function scheduleEnrichment(canonicalId, { force = false } = {}) {
   if (enrichQueued.has(canonicalId)) return;
   enrichQueued.add(canonicalId);
   enrichChain = enrichChain.then(async () => {
     try {
-      await runEnrichmentOnce(canonicalId);
+      await runEnrichmentOnce(canonicalId, force);
     } catch (err) {
       console.warn('[paperclip] enrich queue error', canonicalId, err);
     } finally {
@@ -313,28 +333,31 @@ function scheduleEnrichment(canonicalId) {
   });
 }
 
-async function runEnrichmentOnce(canonicalId) {
+async function runEnrichmentOnce(canonicalId, force = false) {
   const store = await chrome.storage.local.get(PAPERS_KEY);
   const papers = store[PAPERS_KEY] || {};
   const paper = papers[canonicalId];
   if (!paper) return;
-
-  const isCurrent = (paper.enrichmentVersion || 0) >= ENRICHMENT_VERSION;
-  if ((paper.enrichmentStatus === 'ok' || paper.enrichmentStatus === 'unsupported') && isCurrent) {
-    return;
-  }
+  if (!needsEnrichment(paper) && !(force && paper.enrichmentStatus === 'failed')) return;
 
   let patches = null;
   try {
     patches = await PaperEnrich.enrich(paper);
   } catch (err) {
     console.warn('[paperclip] enrich error', canonicalId, err);
+    const attempts = (paper.enrichAttempts || 0) + 1;
     paper.enrichmentStatus = 'failed';
+    paper.enrichAttempts = attempts;
+    paper.nextEnrichAt = attempts <= ENRICH_RETRY_DELAYS_MS.length
+      ? Date.now() + ENRICH_RETRY_DELAYS_MS[attempts - 1]
+      : null;
     paper.enrichedAt = new Date().toISOString();
     paper.enrichmentVersion = ENRICHMENT_VERSION;
     await chrome.storage.local.set({ [PAPERS_KEY]: papers });
     return;
   }
+  delete paper.enrichAttempts;
+  delete paper.nextEnrichAt;
 
   if (patches == null) {
     paper.enrichmentStatus = 'unsupported';
@@ -365,22 +388,17 @@ async function runEnrichmentOnce(canonicalId) {
 
 /**
  * Find any papers that need enrichment and re-queue them. Includes:
- *   - 'pending' or 'failed' status (never finished or transient error)
+ *   - 'pending' status (never finished)
+ *   - 'failed' status whose backoff delay has passed
  *   - 'ok' but enrichmentVersion is below the current code (schema upgrade)
  * Called after backfill, on browser startup, and on extension install.
  */
 async function retryStuckEnrichments() {
   const store = await chrome.storage.local.get(PAPERS_KEY);
   const papers = store[PAPERS_KEY] || {};
+  const now = Date.now();
   for (const p of Object.values(papers)) {
-    const isCurrent = (p.enrichmentVersion || 0) >= ENRICHMENT_VERSION;
-    if (
-      p.enrichmentStatus === 'pending' ||
-      p.enrichmentStatus === 'failed' ||
-      !isCurrent
-    ) {
-      scheduleEnrichment(p.id);
-    }
+    if (needsEnrichment(p, now)) scheduleEnrichment(p.id);
   }
 }
 
@@ -522,6 +540,12 @@ async function cleanupJunkTitles() {
   for (const p of Object.values(papers)) {
     if (p.title && looksLikeErrorPage(p.title)) {
       p.title = null;
+      changed = true;
+    }
+    // Entries the classifier would now reject (e.g. "arxiv:TODO" from a
+    // placeholder link) can never be enriched; drop them.
+    if (p.source === 'arxiv' && !isValidArxivId(p.sourceId)) {
+      delete papers[p.id];
       changed = true;
     }
   }

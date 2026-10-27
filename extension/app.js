@@ -322,7 +322,9 @@ function renderDetail(p) {
   } else if (p.enrichmentStatus === 'pending') {
     abstractHtml = '<div class="paper-detail-empty">Fetching abstract…</div>';
   } else if (p.enrichmentStatus === 'failed') {
-    abstractHtml = '<div class="paper-detail-empty">Couldn\'t fetch abstract — will retry.</div>';
+    abstractHtml = p.nextEnrichAt === null
+      ? '<div class="paper-detail-empty">Couldn\'t fetch abstract.</div>'
+      : '<div class="paper-detail-empty">Couldn\'t fetch abstract — will retry.</div>';
   } else {
     abstractHtml = '<div class="paper-detail-empty">No abstract available.</div>';
   }
@@ -413,7 +415,9 @@ function renderRow(p, openMap, thumb) {
     if (p.enrichmentStatus === 'pending') {
       subParts.push('<span class="paper-status paper-status-pending"><span class="paper-status-dot"></span>fetching metadata</span>');
     } else if (p.enrichmentStatus === 'failed') {
-      subParts.push('<span class="paper-status paper-status-failed">metadata unavailable · will retry</span>');
+      subParts.push(p.nextEnrichAt === null
+        ? '<span class="paper-status paper-status-failed">metadata unavailable</span>'
+        : '<span class="paper-status paper-status-failed">metadata unavailable · will retry</span>');
     }
   }
 

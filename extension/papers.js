@@ -20,6 +20,11 @@
     return (host || '').toLowerCase().replace(/^www\./, '');
   }
 
+  // New-style (2401.12345) or old-style (cs/0301001, math.AG/0301001) IDs.
+  function isValidArxivId(id) {
+    return /^(\d{4}\.\d{4,5}|[a-z][a-z.\-]*\/\d{7})$/i.test(id || '');
+  }
+
   function classifyPaper(rawUrl) {
     const u = safeUrl(rawUrl);
     if (!u) return null;
@@ -35,7 +40,7 @@
       const m = path.match(/^\/(?:abs|pdf|html|ps|format)\/([\w.\-]+(?:\/[\w.\-]+)?)(?:\.pdf)?\/?$/i);
       if (m) {
         const id = m[1].replace(/v\d+$/i, '');
-        return { source: 'arxiv', sourceId: id, canonicalId: `arxiv:${id}` };
+        if (isValidArxivId(id)) return { source: 'arxiv', sourceId: id, canonicalId: `arxiv:${id}` };
       }
     }
 
@@ -158,4 +163,5 @@
 
   // Expose to both service worker (self) and window contexts
   self.classifyPaper = classifyPaper;
+  self.isValidArxivId = isValidArxivId;
 })();
