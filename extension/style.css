@@ -1351,11 +1351,44 @@ body.pdf-panel-resizing .pdf-frame {
   object-position: top;
 }
 
-.paper-card-thumb-placeholder {
+.paper-card-textcover {
   position: absolute;
-  inset: 6px;
-  border: 1px dashed var(--warm-gray);
-  border-radius: 4px;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 22px 16px 16px;
+  background: var(--card-bg);
+}
+
+.paper-card-textcover-source {
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.paper-card-textcover-title {
+  font-family: 'Newsreader', serif;
+  font-size: 17px;
+  line-height: 1.25;
+  color: var(--ink);
+  display: -webkit-box;
+  -webkit-line-clamp: 6;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.paper-card-textcover-meta {
+  margin-top: auto;
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .paper-card-star {

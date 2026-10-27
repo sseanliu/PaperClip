@@ -510,6 +510,19 @@ function renderRow(p, openMap, thumb) {
 // Gallery card: cover thumbnail with the title underneath. Reuses the
 // .paper-row class so the delegated click handlers work unchanged (title
 // click opens the paper, cover click opens the side peek).
+// Stand-in cover for papers without a first-page image (paywalled or
+// bot-blocked PDFs): source, title and venue set like a title page.
+function renderTextCover(p, title) {
+  const source = SOURCE_LABELS[p.source] || p.source || '';
+  const meta = [p.venue, p.year].filter(Boolean).join(' · ');
+  return `
+    <div class="paper-card-textcover">
+      ${source ? `<span class="paper-card-textcover-source">${escapeHtml(source)}</span>` : ''}
+      <span class="paper-card-textcover-title">${escapeHtml(title)}</span>
+      ${meta ? `<span class="paper-card-textcover-meta">${escapeHtml(meta)}</span>` : ''}
+    </div>`;
+}
+
 function renderCard(p, openMap, thumb) {
   const open = openMap.get(p.id);
   const title = displayTitle(p);
@@ -528,7 +541,7 @@ function renderCard(p, openMap, thumb) {
       <div class="paper-card-cover">
         ${thumb
           ? `<img class="paper-card-thumb" src="${thumb}" alt="" loading="lazy">`
-          : '<div class="paper-card-thumb-placeholder"></div>'}
+          : renderTextCover(p, title)}
         ${p.starred
           ? `<span class="paper-card-star">
                <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="currentColor" stroke="none">
