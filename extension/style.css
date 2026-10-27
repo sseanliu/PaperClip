@@ -1301,6 +1301,14 @@ body.pdf-panel-resizing .pdf-frame {
   color: var(--ink);
 }
 
+/* Off-screen list rows skip layout and paint until scrolled near; `auto`
+   remembers each row's last rendered height. (Not on gallery cards: their
+   cover shadows and cursor ring extend past the card box and would clip.) */
+.paper-list:not(.is-gallery) .paper-row {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 88px;
+}
+
 /* ---- Gallery view ---- */
 .paper-list.is-gallery {
   display: grid;

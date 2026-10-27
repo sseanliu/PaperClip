@@ -181,6 +181,11 @@ async function getOpenPaperMap() {
   return map;
 }
 
+// Which papers are open in a tab. Recomputed only after tab events mark it
+// stale, not on every render.
+let openPaperMap = new Map();
+let openMapStale = true;
+
 // ─── Filtering / sorting ──────────────────────────────────────────────────────
 
 // Sidebar filter state. type ∈ 'all' | 'starred' | 'untagged' | 'tag'.
@@ -537,6 +542,8 @@ function renderCard(p, openMap, thumb) {
   `;
 }
 
+let lastSidebarHtml = '';
+
 async function renderSidebar() {
   const nav = document.getElementById('sidebarNav');
   if (!nav) return;
@@ -608,7 +615,7 @@ async function renderSidebar() {
       ${userTags.map(renderUserTag).join('')}
     `;
 
-  nav.innerHTML = `
+  const html = `
     <div class="sidebar-section-label">Library</div>
     ${builtin('all',      'All Papers', total)}
     ${builtin('starred',  'Starred',    starredCount)}
@@ -621,6 +628,50 @@ async function renderSidebar() {
     </button>
     <input class="sidebar-new-tag-input" id="sidebarNewTagInput" type="text" placeholder="Tag name, then Enter" hidden>
   `;
+  // Unchanged counts and tags: keep the DOM (and an in-progress new-tag input).
+  if (html === lastSidebarHtml) return;
+  lastSidebarHtml = html;
+  nav.innerHTML = html;
+}
+
+// Rendered entries keyed by paper ID: the HTML each was built from and its
+// nodes (the row, plus its detail panel when expanded). A re-render rebuilds
+// only the entries whose HTML changed and reorders the rest, so unchanged
+// rows keep their DOM and already-decoded thumbnails.
+const renderedGroups = new Map();
+
+function patchList(list, items) {
+  const tpl = document.createElement('template');
+  const next = new Map();
+  for (const { id, html } of items) {
+    let group = renderedGroups.get(id);
+    if (!group || group.html !== html) {
+      tpl.innerHTML = html;
+      group = { html, nodes: [...tpl.content.children] };
+    }
+    next.set(id, group);
+  }
+  // Walk the wanted order, moving nodes into place; whatever is left after
+  // the cursor belongs to entries that are gone.
+  let cursor = list.firstChild;
+  for (const group of next.values()) {
+    for (const node of group.nodes) {
+      if (node === cursor) cursor = cursor.nextSibling;
+      else list.insertBefore(node, cursor);
+    }
+  }
+  while (cursor) {
+    const after = cursor.nextSibling;
+    cursor.remove();
+    cursor = after;
+  }
+  renderedGroups.clear();
+  for (const [id, group] of next) renderedGroups.set(id, group);
+}
+
+function clearList(list) {
+  list.innerHTML = '';
+  renderedGroups.clear();
 }
 
 async function renderLibrary(filter = '') {
@@ -630,7 +681,12 @@ async function renderLibrary(filter = '') {
   const emptyEl = document.getElementById('paperEmpty');
   if (!list) return;
 
-  const [papers, openMap] = await Promise.all([getPapers(), getOpenPaperMap()]);
+  if (openMapStale) {
+    openMapStale = false;
+    openPaperMap = await getOpenPaperMap();
+  }
+  const openMap = openPaperMap;
+  const papers = await getPapers();
   const all = Object.values(papers);
 
   const q = filter.trim().toLowerCase();
@@ -642,7 +698,7 @@ async function renderLibrary(filter = '') {
   if (cursorId && !renderedIds.includes(cursorId)) cursorId = null;
 
   if (all.length === 0) {
-    list.innerHTML = '';
+    clearList(list);
     if (header) header.style.display = 'none';
     emptyEl.style.display = 'flex';
     emptyEl.querySelector('[data-empty-state="initial"]').style.display = 'block';
@@ -652,7 +708,7 @@ async function renderLibrary(filter = '') {
   }
 
   if (sorted.length === 0) {
-    list.innerHTML = '';
+    clearList(list);
     if (header) header.style.display = 'none';
     emptyEl.style.display = 'flex';
     emptyEl.querySelector('[data-empty-state="initial"]').style.display = 'none';
@@ -674,7 +730,7 @@ async function renderLibrary(filter = '') {
   if (thumbs) await thumbs.ready;
   const size = gallery ? 'large' : 'small';
   const render = gallery ? renderCard : renderRow;
-  list.innerHTML = sorted.map(p => render(p, openMap, thumbs && thumbs.urlFor(p.id, size))).join('');
+  patchList(list, sorted.map(p => ({ id: p.id, html: render(p, openMap, thumbs && thumbs.urlFor(p.id, size)) })));
   applyCursor();
 
   // Drop selections that no longer exist (e.g. after delete)
@@ -1043,9 +1099,15 @@ document.addEventListener('click', async (e) => {
 
 // Coalesce rapid re-render triggers (storage writes during enrichment, tab
 // events firing for every URL/status/title change) into a single render so
-// expanded rows don't visibly flash from constant DOM rebuilds.
+// expanded rows don't visibly flash from constant DOM rebuilds. A page in a
+// background tab only notes that it is out of date and renders once shown.
 let renderTimer = null;
+let renderPending = false;
 function scheduleRender(delay = 200) {
+  if (document.hidden) {
+    renderPending = true;
+    return;
+  }
   clearTimeout(renderTimer);
   renderTimer = setTimeout(() => {
     const search = document.getElementById('paperSearch');
@@ -1064,9 +1126,19 @@ document.addEventListener('input', (e) => {
 // Thumbnail arrivals are wired up in init(), once thumbs.js has loaded.
 PaperStore.onChange(() => scheduleRender(150));
 
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && renderPending) {
+    renderPending = false;
+    scheduleRender(0);
+  }
+});
+
 // Re-render on tab open/close so the open-status dots stay accurate.
 if (chrome.tabs && chrome.tabs.onCreated && chrome.tabs.onRemoved) {
-  const refresh = () => scheduleRender(250);
+  const refresh = () => {
+    openMapStale = true;
+    scheduleRender(250);
+  };
   chrome.tabs.onCreated.addListener(refresh);
   chrome.tabs.onRemoved.addListener(refresh);
   chrome.tabs.onUpdated.addListener((_, changeInfo) => {
