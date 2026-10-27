@@ -152,6 +152,29 @@
     return out;
   }
 
+  // ─── IEEE Xplore ──────────────────────────────────────────────────────────
+  //
+  // Xplore blocks scripted requests, and its document numbers aren't in any
+  // open index. Look the paper up by its title (taken from the tab) in
+  // Crossref, limited to IEEE's DOI prefix, and accept only an exact match.
+
+  async function enrichIeee(paper) {
+    const title = (paper.title || '').replace(/\s*\|\s*IEEE\b.*$/i, '').trim();
+    if (!title || /^IEEE:/i.test(title)) return null;
+    const url = `https://api.crossref.org/works?query.bibliographic=${encodeURIComponent(title)}&filter=prefix:10.1109&rows=5&select=DOI,title`;
+    const r = await fetch(url, {
+      headers: { 'User-Agent': 'PaperClip/1.0 (Chrome extension)' }
+    });
+    if (!r.ok) throw new Error(`crossref: HTTP ${r.status}`);
+    const json = await r.json();
+    const items = (json && json.message && json.message.items) || [];
+    const want = normalizedTitle(title);
+    const hit = items.find(it => normalizedTitle(Array.isArray(it.title) ? it.title[0] : it.title) === want);
+    if (!hit) return null;
+    const meta = await enrichCrossref({ doi: hit.DOI });
+    return meta && { ...meta, externalIds: { DOI: hit.DOI } };
+  }
+
   // ─── CVF Open Access (openaccess.thecvf.com) ──────────────────────────────
   //
   // No metadata API, but the filename encodes everything:
@@ -228,7 +251,9 @@
     if (paper.source === 'arxiv' && paper.sourceId) return `arXiv:${paper.sourceId}`;
     if (paper.doi) return `DOI:${paper.doi}`;
     if (paper.source === 'semanticscholar' && paper.sourceId) return paper.sourceId;
-    if (paper.url) return `URL:${paper.url}`;
+    // S2 doesn't resolve Xplore URLs; the request only errors and turns the
+    // entry into a retried failure instead of 'unsupported'.
+    if (paper.url && paper.source !== 'ieee') return `URL:${paper.url}`;
     return null;
   }
 
@@ -302,6 +327,9 @@
         case 'cvf':
           primary = await enrichCvf(paper);
           break;
+        case 'ieee':
+          primary = await enrichIeee(paper);
+          break;
         case 'biorxiv':
         case 'medrxiv':
         case 'acm':
@@ -319,7 +347,9 @@
     let supplementError = null;
 
     try {
-      const identifier = s2IdentifierFor(paper);
+      // A DOI found by the primary lookup (IEEE) beats the page URL.
+      const foundDoi = !paper.doi && primary && primary.externalIds && primary.externalIds.DOI;
+      const identifier = foundDoi ? `DOI:${foundDoi}` : s2IdentifierFor(paper);
       if (identifier) supplement = await fetchS2(identifier);
     } catch (err) {
       supplementError = err;

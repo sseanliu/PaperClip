@@ -20,6 +20,7 @@ import * as pdfjsLib from './vendor/pdf.min.mjs';
 pdfjsLib.GlobalWorkerOptions.workerSrc = './vendor/pdf.worker.min.mjs';
 
 const FAIL_RETRY_MS = 7 * 24 * 60 * 60 * 1000; // retry failures after a week
+const OPEN_PDF_RECHECK_MS = 30 * 24 * 60 * 60 * 1000; // re-ask OpenAlex monthly
 const LARGE_WIDTH = 480; // 2x of the ~240px max display size (gallery cards)
 const SMALL_WIDTH = 120; // list rows show 44px-wide thumbnails
 const THROTTLE_MS = 800;
@@ -195,6 +196,33 @@ export function pdfUrlFor(p) {
   return null;
 }
 
+function doiOf(p) {
+  return p.doi || (p.externalIds && p.externalIds.DOI) || null;
+}
+
+// Hosts that refuse scripted PDF downloads (bot challenges, logins); their
+// links are only a last resort.
+const BLOCKING_HOSTS = /(^|\.)(dl\.acm\.org|ieeexplore\.ieee\.org|openreview\.net|sciencedirect\.com|researchgate\.net)$/i;
+
+/**
+ * Find an open copy of a paper by DOI in OpenAlex, which lists every known
+ * location (arXiv, author pages, repositories). Prefers arXiv, then hosts
+ * that serve PDFs to scripts. Returns null when there is none.
+ */
+async function findOpenPdf(doi) {
+  const r = await fetch(`https://api.openalex.org/works/doi:${encodeURIComponent(doi)}?select=locations`);
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(`openalex: HTTP ${r.status}`);
+  const json = await r.json();
+  const urls = (json.locations || []).map(l => l && l.pdf_url).filter(Boolean);
+  const rank = (u) => {
+    if (/^https?:\/\/(export\.)?arxiv\.org\//i.test(u)) return 0;
+    try { return BLOCKING_HOSTS.test(new URL(u).hostname) ? 2 : 1; } catch { return 3; }
+  };
+  urls.sort((a, b) => rank(a) - rank(b));
+  return urls[0] || null;
+}
+
 async function shrink(source) {
   const bmp = await createImageBitmap(source, { resizeWidth: SMALL_WIDTH, resizeQuality: 'high' });
   const canvas = new OffscreenCanvas(bmp.width, bmp.height);
@@ -284,8 +312,27 @@ async function workQueue() {
     announce(orphans, orphans.map(() => null));
   }
 
-  for (const p of [...papers.values()]) {
-    const url = pdfUrlFor(p);
+  for (let p of [...papers.values()]) {
+    let url = pdfUrlFor(p);
+    // No PDF link from the source page (ACM, IEEE, paywalled publishers):
+    // ask OpenAlex for an open copy and remember the answer on the paper,
+    // so the side peek can open it too.
+    const doi = doiOf(p);
+    if (!url && doi && !(p.openPdfCheckedAt && Date.now() - p.openPdfCheckedAt < OPEN_PDF_RECHECK_MS)) {
+      let found;
+      try {
+        found = await findOpenPdf(doi);
+      } catch (err) {
+        console.warn('[paperclip] open PDF lookup failed', p.id, err && err.message);
+        continue;
+      }
+      p = (await PaperStore.update(p.id, (x) => {
+        x.openPdfUrl = found;
+        x.openPdfCheckedAt = Date.now();
+      })) || p;
+      url = pdfUrlFor(p);
+      await new Promise(r => setTimeout(r, THROTTLE_MS));
+    }
     if (!url) continue;
     const rec = records.get(p.id);
     if (rec && rec.v === THUMB_VERSION) {

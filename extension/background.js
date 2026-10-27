@@ -75,7 +75,7 @@ function looksLikeErrorPage(s) {
  */
 function fallbackTitle(rawTitle, cls) {
   const cleaned = (rawTitle || '')
-    .replace(/\s*[-|–—]\s*(arXiv|OpenReview|bioRxiv|medRxiv|ACM Digital Library|IEEE Xplore|Springer|Nature|Science|NeurIPS|ACL Anthology|Semantic Scholar).*$/i, '')
+    .replace(/\s*[-|–—]\s*(arXiv|OpenReview|bioRxiv|medRxiv|ACM Digital Library|IEEE (?:Xplore|Conference|Journal)|Springer|Nature|Science|NeurIPS|ACL Anthology|Semantic Scholar).*$/i, '')
     .replace(/\s+/g, ' ')
     .trim();
   if (cleaned && !looksLikeUrlOrFilename(cleaned) && !looksLikeErrorPage(cleaned)) return cleaned;
@@ -85,6 +85,16 @@ function fallbackTitle(rawTitle, cls) {
     return `${label}:${cls.sourceId}`;
   }
   return '';
+}
+
+/**
+ * True when a stored title is only a stand-in: empty, a URL, or the
+ * "<Source>:<id>" placeholder fallbackTitle builds before the page has loaded.
+ */
+function isPlaceholderTitle(title, source, sourceId) {
+  if (!title || looksLikeUrlOrFilename(title)) return true;
+  const label = SOURCE_LABELS[source] || source;
+  return !!sourceId && title === `${label}:${sourceId}`;
 }
 
 // Per-tab dedup: tabId → canonicalId of the last paper we logged on that tab.
@@ -129,9 +139,17 @@ async function capturePaper(tab, mode = 'visit') {
         existing.url = tab.url;
         didMutate = true;
       }
+      // Replace a placeholder saved before the page title loaded. Without
+      // this, sources with no metadata API (IEEE) kept "IEEE:<number>".
       const t = fallbackTitle(tab.title || '', cls);
-      if (!existing.title && t) {
+      if (
+        t &&
+        !isPlaceholderTitle(t, cls.source, cls.sourceId) &&
+        isPlaceholderTitle(existing.title, existing.source, existing.sourceId)
+      ) {
         existing.title = t;
+        // A real title is what title-based enrichment (IEEE) was missing.
+        if (existing.enrichmentStatus === 'unsupported') existing.enrichmentStatus = 'pending';
         didMutate = true;
       }
     }
@@ -537,11 +555,31 @@ async function cleanupJunkTitles() {
 
 // ─── Event listeners ──────────────────────────────────────────────────────────
 
+/**
+ * One time: IEEE entries were all 'unsupported' before the title-based
+ * Crossref lookup existed. Re-queue them; the ones still titled
+ * "IEEE:<number>" go back to 'unsupported' until the page is visited again.
+ */
+async function requeueIeeeOnce() {
+  const { ieeeRequeued } = await chrome.storage.local.get('ieeeRequeued');
+  if (ieeeRequeued) return;
+  await PaperStore.edit((papers) => {
+    for (const p of Object.values(papers)) {
+      if (p.source !== 'ieee' || p.enrichmentStatus !== 'unsupported') continue;
+      p.enrichmentStatus = 'pending';
+      // Earlier captures kept the tab title's " | IEEE Conference Publication".
+      if (p.title) p.title = fallbackTitle(p.title, null) || p.title;
+    }
+  });
+  await chrome.storage.local.set({ ieeeRequeued: true });
+}
+
 chrome.runtime.onInstalled.addListener(async () => {
   updateBadge();
   await backfillExistingTabs();
   await reclassifyGenericPdfs();
   await cleanupJunkTitles();
+  await requeueIeeeOnce();
   retryStuckEnrichments();
 });
 
@@ -595,7 +633,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
 
 // Initial run
 updateBadge();
-backfillExistingTabs().then(() => retryStuckEnrichments());
+backfillExistingTabs()
+  .then(() => requeueIeeeOnce())
+  .then(() => retryStuckEnrichments());
 
 // ---------------------------------------------------------------------------
 // Obsidian bridge: mirror the library to the local vault via native messaging.
