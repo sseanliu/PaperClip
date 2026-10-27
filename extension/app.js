@@ -2,14 +2,13 @@
  * app.js — PaperClip new tab page.
  *
  * Renders a Zotero-style library of every paper that's been auto-captured
- * by the service worker. Reads chrome.storage.local.papers and chrome.tabs
- * to mark which papers are currently open.
+ * by the service worker. Reads papers through PaperStore and chrome.tabs to
+ * mark which papers are currently open.
  *
- * The classifier (classifyPaper) comes from papers.js, loaded ahead of this
- * script in index.html.
+ * The classifier (classifyPaper) comes from papers.js and PaperStore from
+ * store.js, both loaded ahead of this script in index.html.
  */
 
-const PAPERS_KEY = 'papers';
 const TAGS_KEY = 'tags';
 
 const SOURCE_LABELS = {
@@ -104,9 +103,9 @@ function displayTitle(p) {
 
 // ─── Data access ──────────────────────────────────────────────────────────────
 
+// Read-only { id: paper } view of the cached library.
 async function getPapers() {
-  const store = await chrome.storage.local.get(PAPERS_KEY);
-  return store[PAPERS_KEY] || {};
+  return PaperStore.toObject();
 }
 
 async function getTags() {
@@ -151,17 +150,16 @@ async function renameTagById(id, rawName) {
 
 async function deleteTagById(id) {
   // Strip the tag from every paper, then remove the tag itself.
-  // Single batched write so the UI sees a consistent snapshot.
-  const store = await chrome.storage.local.get([PAPERS_KEY, TAGS_KEY]);
-  const papers = store[PAPERS_KEY] || {};
-  const tags = store[TAGS_KEY] || {};
-  for (const p of Object.values(papers)) {
-    if (Array.isArray(p.tags) && p.tags.includes(id)) {
-      p.tags = p.tags.filter(t => t !== id);
+  await PaperStore.edit((papers) => {
+    for (const p of Object.values(papers)) {
+      if (Array.isArray(p.tags) && p.tags.includes(id)) {
+        p.tags = p.tags.filter(t => t !== id);
+      }
     }
-  }
+  });
+  const tags = await getTags();
   delete tags[id];
-  await chrome.storage.local.set({ [PAPERS_KEY]: papers, [TAGS_KEY]: tags });
+  await saveTags(tags);
 }
 
 function countPapersWithTag(allPapers, tagId) {
@@ -727,8 +725,7 @@ function formatPaperForCopy(p) {
 }
 
 async function copySelectedToClipboard() {
-  const store = await chrome.storage.local.get(PAPERS_KEY);
-  const papers = store[PAPERS_KEY] || {};
+  const papers = await getPapers();
   const selected = [...selectedIds].map(id => papers[id]).filter(Boolean);
   if (!selected.length) return 0;
   // Sort selected the same way the list is sorted (consistent paste order)
@@ -744,8 +741,7 @@ async function deleteSelected() {
   if (!ok) return;
 
   const ids = [...selectedIds];
-  const store = await chrome.storage.local.get(PAPERS_KEY);
-  const papers = store[PAPERS_KEY] || {};
+  const papers = await getPapers();
 
   // Build the set of canonical IDs (incl. aliases) whose tabs we should close.
   const canonicalsToClose = new Set();
@@ -769,8 +765,7 @@ async function deleteSelected() {
     console.warn('[paperclip] could not close tabs for selected', err);
   }
 
-  for (const id of ids) delete papers[id];
-  await chrome.storage.local.set({ [PAPERS_KEY]: papers });
+  await PaperStore.remove(ids);
 
   selectedIds.clear();
 }
@@ -877,17 +872,11 @@ document.addEventListener('drop', async (e) => {
 });
 
 async function patchPaper(id, mutate) {
-  const store = await chrome.storage.local.get(PAPERS_KEY);
-  const papers = store[PAPERS_KEY] || {};
-  if (!papers[id]) return;
-  mutate(papers[id]);
-  await chrome.storage.local.set({ [PAPERS_KEY]: papers });
+  await PaperStore.update(id, mutate);
 }
 
 async function deletePaper(id) {
-  const store = await chrome.storage.local.get(PAPERS_KEY);
-  const papers = store[PAPERS_KEY] || {};
-  const paper = papers[id];
+  const paper = await PaperStore.get(id);
   if (!paper) return;
 
   // Close any currently-open tabs holding this paper (or any alias from
@@ -906,8 +895,7 @@ async function deletePaper(id) {
     console.warn('[paperclip] could not close tabs for', id, err);
   }
 
-  delete papers[id];
-  await chrome.storage.local.set({ [PAPERS_KEY]: papers });
+  await PaperStore.remove(id);
 }
 
 document.addEventListener('click', async (e) => {
@@ -939,23 +927,18 @@ document.addEventListener('click', async (e) => {
       // Click on an already-starred paper: open the tag picker so the user
       // can manage tag membership (and uncheck Starred to unstar).
       const id = row.dataset.id;
-      const store = await chrome.storage.local.get(PAPERS_KEY);
-      const papers = store[PAPERS_KEY] || {};
-      const paper = papers[id];
+      const paper = await PaperStore.get(id);
       if (!paper) return;
       if (!paper.starred) {
-        paper.starred = true;
-        await chrome.storage.local.set({ [PAPERS_KEY]: papers });
+        await patchPaper(id, p => { p.starred = true; });
       } else {
         await openTagPickerFor(actionBtn, id);
       }
       return;
     }
     if (action === 'copy-single') {
-      const store = await chrome.storage.local.get(PAPERS_KEY);
-      const papers = store[PAPERS_KEY] || {};
       const id = row.dataset.id;
-      const paper = papers[id];
+      const paper = await PaperStore.get(id);
       if (!paper) return;
       try {
         await navigator.clipboard.writeText(formatPaperForCopy(paper));
@@ -1078,11 +1061,10 @@ document.addEventListener('input', (e) => {
 
 // Re-render whenever the service worker writes new papers / enrichment,
 // or the thumbnail renderer caches a new first-page image.
+PaperStore.onChange(() => scheduleRender(150));
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== 'local') return;
-  const relevant = changes[PAPERS_KEY]
-    || Object.keys(changes).some(k => k.startsWith(THUMB_PREFIX));
-  if (relevant) scheduleRender(150);
+  if (Object.keys(changes).some(k => k.startsWith(THUMB_PREFIX))) scheduleRender(150);
 });
 
 // Re-render on tab open/close so the open-status dots stay accurate.
@@ -1113,9 +1095,8 @@ function downloadJson(filename, obj) {
 }
 
 async function exportLibrary() {
-  const store = await chrome.storage.local.get([PAPERS_KEY, TAGS_KEY]);
-  const papers = store[PAPERS_KEY] || {};
-  const tags = store[TAGS_KEY] || {};
+  const papers = await getPapers();
+  const tags = await getTags();
   const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
   downloadJson(`paperclip-backup-${stamp}.json`, {
     schema: 'paperclip.library.v2',
@@ -1201,9 +1182,7 @@ async function importLibrary(file) {
     return { error: 'Unexpected file shape — expected an object of papers.' };
   }
 
-  const store = await chrome.storage.local.get([PAPERS_KEY, TAGS_KEY]);
-  const papers = store[PAPERS_KEY] || {};
-  const tags = store[TAGS_KEY] || {};
+  const tags = await getTags();
 
   // Merge tags map first so paper.tags references are valid afterwards.
   // Tag ids that already exist locally keep their existing name (no rename
@@ -1222,19 +1201,20 @@ async function importLibrary(file) {
   }
 
   let added = 0, merged = 0, skipped = 0;
-  for (const [id, item] of Object.entries(incomingPapers)) {
-    if (!isImportablePaper(item)) { skipped++; continue; }
-    if (item.id !== id) item.id = id;
-    if (papers[id]) {
-      mergeImportedPaper(papers[id], item);
-      merged++;
-    } else {
-      papers[id] = item;
-      added++;
+  await saveTags(tags);
+  await PaperStore.edit((papers) => {
+    for (const [id, item] of Object.entries(incomingPapers)) {
+      if (!isImportablePaper(item)) { skipped++; continue; }
+      if (item.id !== id) item.id = id;
+      if (papers[id]) {
+        mergeImportedPaper(papers[id], item);
+        merged++;
+      } else {
+        papers[id] = item;
+        added++;
+      }
     }
-  }
-
-  await chrome.storage.local.set({ [PAPERS_KEY]: papers, [TAGS_KEY]: tags });
+  });
   return { added, merged, skipped, tagsAdded };
 }
 
@@ -1252,8 +1232,7 @@ function setSettingsStatus(text) {
 async function refreshSettingsInfo() {
   const infoEl = document.getElementById('settingsInfo');
   if (!infoEl) return;
-  const store = await chrome.storage.local.get(PAPERS_KEY);
-  const papers = store[PAPERS_KEY] || {};
+  const papers = await getPapers();
   const count = Object.keys(papers).length;
   const bytes = new Blob([JSON.stringify(papers)]).size;
   const sizeStr = bytes >= 1024 * 1024

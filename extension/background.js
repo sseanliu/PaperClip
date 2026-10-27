@@ -3,13 +3,13 @@
  *
  * Two responsibilities:
  *   1. Toolbar badge: shows count of open real-web tabs, color-coded by load.
- *   2. Paper auto-capture: any paper URL visited gets persisted to
- *      chrome.storage.local.papers permanently, with metadata enrichment
- *      kicked off in the background.
+ *   2. Paper auto-capture: any paper URL visited gets persisted through
+ *      PaperStore (store.js) permanently, with metadata enrichment kicked
+ *      off in the background.
  */
 
 // Pull in the URL classifier and metadata fetcher.
-importScripts('papers.js', 'enrich.js');
+importScripts('papers.js', 'enrich.js', 'store.js');
 
 // ─── Badge updater ────────────────────────────────────────────────────────────
 
@@ -21,8 +21,6 @@ async function updateBadge() {
 }
 
 // ─── Paper auto-capture ───────────────────────────────────────────────────────
-
-const PAPERS_KEY = 'papers';
 
 const SOURCE_LABELS = {
   arxiv: 'arXiv',
@@ -95,20 +93,6 @@ function fallbackTitle(rawTitle, cls) {
 const lastCapturedByTab = new Map();
 
 /**
- * Look up an existing paper entry by canonical ID. If the direct key isn't
- * present, also check whether any other entry has this ID in its aliases —
- * which means this canonical ID was merged into a different primary record.
- * Without this, every backfill scan after a merge re-creates the duplicate.
- */
-function findExistingPaper(papers, canonicalId) {
-  if (papers[canonicalId]) return papers[canonicalId];
-  for (const p of Object.values(papers)) {
-    if (Array.isArray(p.aliases) && p.aliases.includes(canonicalId)) return p;
-  }
-  return null;
-}
-
-/**
  * Upsert a paper into storage.
  *
  * mode:
@@ -126,9 +110,9 @@ async function capturePaper(tab, mode = 'visit') {
   }
 
   const now = new Date().toISOString();
-  const store = await chrome.storage.local.get(PAPERS_KEY);
-  const papers = store[PAPERS_KEY] || {};
-  const existing = findExistingPaper(papers, cls.canonicalId);
+  const cached = await PaperStore.findByIdOrAlias(cls.canonicalId);
+  const existing = cached ? structuredClone(cached) : null;
+  let created = null;
 
   let didMutate = false;
 
@@ -153,7 +137,7 @@ async function capturePaper(tab, mode = 'visit') {
     }
     // mode === 'discover' on an existing entry: nothing to do.
   } else {
-    papers[cls.canonicalId] = {
+    created = {
       id: cls.canonicalId,
       url: tab.url,
       source: cls.source,
@@ -178,14 +162,14 @@ async function capturePaper(tab, mode = 'visit') {
   if (tab.id != null) lastCapturedByTab.set(tab.id, cls.canonicalId);
   if (!didMutate) return;
 
-  await chrome.storage.local.set({ [PAPERS_KEY]: papers });
+  const paper = existing || created;
+  await PaperStore.put(paper);
 
   // Kick off metadata enrichment for new entries. A failed entry retries on
   // its backoff schedule, or right away when the user opens the paper again.
   // Use the stored entry's id, which may differ from cls.canonicalId when this
   // URL points to a merged record under a different primary key.
-  const paper = existing || papers[cls.canonicalId];
-  if (paper && (needsEnrichment(paper) || (isFreshVisit && paper.enrichmentStatus === 'failed'))) {
+  if (needsEnrichment(paper) || (isFreshVisit && paper.enrichmentStatus === 'failed')) {
     scheduleEnrichment(paper.id, { force: isFreshVisit });
   }
 }
@@ -199,13 +183,18 @@ async function capturePaper(tab, mode = 'visit') {
 // Lower-confidence matches (slug / title overlap) are surfaced in the popup
 // as "Suggested" entries instead.
 
+// Cheap pre-check: a page can only match by arXiv ID or DOI if its URL or
+// title contains something shaped like one. Most tab updates (mail, chat,
+// video) fail this and never touch the library.
+const PAPER_ID_HINT = /\b\d{4}\.\d{4,5}\b|\/\d{7}\b|\b10\.\d{4,9}\//;
+
 function findVeryHighConfidenceMatch(papers, tab) {
   if (!tab || !tab.url) return null;
   const url = (tab.url || '').toLowerCase();
   const title = (tab.title || '').toLowerCase();
   const haystack = `${url} ${title}`;
 
-  for (const p of Object.values(papers)) {
+  for (const p of papers.values()) {
     if (p.source === 'arxiv' && p.sourceId) {
       const id = p.sourceId.toLowerCase();
       if (id.length >= 7 && haystack.includes(id)) {
@@ -230,26 +219,23 @@ async function maybeAutoAttachToRelated(tab) {
   // Skip tabs that ARE a paper URL — those are auto-captured as the paper
   // itself, not as an attachment to a different paper.
   if (classifyPaper(tab.url)) return;
+  if (!PAPER_ID_HINT.test(`${tab.url} ${tab.title}`)) return;
 
-  const store = await chrome.storage.local.get(PAPERS_KEY);
-  const papers = store[PAPERS_KEY] || {};
-  const match = findVeryHighConfidenceMatch(papers, tab);
+  const match = findVeryHighConfidenceMatch(await PaperStore.all(), tab);
   if (!match) return;
 
-  const paper = match.paper;
-  paper.attachments = Array.isArray(paper.attachments) ? paper.attachments : [];
-  if (paper.attachments.some(a => a && a.url === tab.url)) return; // already linked
-
-  paper.attachments.push({
-    url: tab.url,
-    title: tab.title,
-    addedAt: new Date().toISOString(),
-    autoAttached: true,
-    matchReason: match.why,
+  await PaperStore.update(match.paper.id, (paper) => {
+    paper.attachments = Array.isArray(paper.attachments) ? paper.attachments : [];
+    if (paper.attachments.some(a => a && a.url === tab.url)) return false; // already linked
+    paper.attachments.push({
+      url: tab.url,
+      title: tab.title,
+      addedAt: new Date().toISOString(),
+      autoAttached: true,
+      matchReason: match.why,
+    });
+    if (!paper.starred) paper.starred = true;
   });
-  if (!paper.starred) paper.starred = true;
-
-  await chrome.storage.local.set({ [PAPERS_KEY]: papers });
 }
 
 /**
@@ -264,11 +250,10 @@ async function backfillExistingTabs() {
       if (!t.url) continue;
       const cls = classifyPaper(t.url);
       if (cls) {
-        const before = (await chrome.storage.local.get(PAPERS_KEY))[PAPERS_KEY] || {};
         // Skip if this canonical ID already exists OR is in another paper's
         // aliases (merged duplicate). Otherwise we'd recreate the dupe each
         // time the new-tab page opens.
-        if (!findExistingPaper(before, cls.canonicalId)) {
+        if (!(await PaperStore.findByIdOrAlias(cls.canonicalId))) {
           await capturePaper(t, 'discover');
           added += 1;
         }
@@ -334,9 +319,7 @@ function scheduleEnrichment(canonicalId, { force = false } = {}) {
 }
 
 async function runEnrichmentOnce(canonicalId, force = false) {
-  const store = await chrome.storage.local.get(PAPERS_KEY);
-  const papers = store[PAPERS_KEY] || {};
-  const paper = papers[canonicalId];
+  const paper = await PaperStore.get(canonicalId);
   if (!paper) return;
   if (!needsEnrichment(paper) && !(force && paper.enrichmentStatus === 'failed')) return;
 
@@ -345,45 +328,51 @@ async function runEnrichmentOnce(canonicalId, force = false) {
     patches = await PaperEnrich.enrich(paper);
   } catch (err) {
     console.warn('[paperclip] enrich error', canonicalId, err);
-    const attempts = (paper.enrichAttempts || 0) + 1;
-    paper.enrichmentStatus = 'failed';
-    paper.enrichAttempts = attempts;
-    paper.nextEnrichAt = attempts <= ENRICH_RETRY_DELAYS_MS.length
-      ? Date.now() + ENRICH_RETRY_DELAYS_MS[attempts - 1]
-      : null;
-    paper.enrichedAt = new Date().toISOString();
-    paper.enrichmentVersion = ENRICHMENT_VERSION;
-    await chrome.storage.local.set({ [PAPERS_KEY]: papers });
+    await PaperStore.update(canonicalId, (p) => {
+      const attempts = (p.enrichAttempts || 0) + 1;
+      p.enrichmentStatus = 'failed';
+      p.enrichAttempts = attempts;
+      p.nextEnrichAt = attempts <= ENRICH_RETRY_DELAYS_MS.length
+        ? Date.now() + ENRICH_RETRY_DELAYS_MS[attempts - 1]
+        : null;
+      p.enrichedAt = new Date().toISOString();
+      p.enrichmentVersion = ENRICHMENT_VERSION;
+    });
     return;
   }
-  delete paper.enrichAttempts;
-  delete paper.nextEnrichAt;
 
   if (patches == null) {
-    paper.enrichmentStatus = 'unsupported';
-    paper.enrichedAt = new Date().toISOString();
-    paper.enrichmentVersion = ENRICHMENT_VERSION;
-    await chrome.storage.local.set({ [PAPERS_KEY]: papers });
+    await PaperStore.update(canonicalId, (p) => {
+      delete p.enrichAttempts;
+      delete p.nextEnrichAt;
+      p.enrichmentStatus = 'unsupported';
+      p.enrichedAt = new Date().toISOString();
+      p.enrichmentVersion = ENRICHMENT_VERSION;
+    });
     return;
   }
 
-  if (patches.title) paper.title = patches.title;
-  if (Array.isArray(patches.authors) && patches.authors.length) paper.authors = patches.authors;
-  if (patches.year != null) paper.year = patches.year;
-  if (patches.venue) paper.venue = patches.venue;
-  if (patches.abstract) paper.abstract = patches.abstract;
-  if (patches.externalIds) paper.externalIds = patches.externalIds;
-  paper.enrichmentStatus = 'ok';
-  paper.enrichedAt = new Date().toISOString();
-  paper.enrichmentVersion = ENRICHMENT_VERSION;
+  await PaperStore.edit((papers) => {
+    const p = papers[canonicalId];
+    if (!p) return;
+    delete p.enrichAttempts;
+    delete p.nextEnrichAt;
+    if (patches.title) p.title = patches.title;
+    if (Array.isArray(patches.authors) && patches.authors.length) p.authors = patches.authors;
+    if (patches.year != null) p.year = patches.year;
+    if (patches.venue) p.venue = patches.venue;
+    if (patches.abstract) p.abstract = patches.abstract;
+    if (patches.externalIds) p.externalIds = patches.externalIds;
+    p.enrichmentStatus = 'ok';
+    p.enrichedAt = new Date().toISOString();
+    p.enrichmentVersion = ENRICHMENT_VERSION;
 
-  // Now that we know this paper's external IDs (DOI / ArXiv / etc.), check
-  // whether any other entry in the library is the same paper under a
-  // different canonical ID — same paper visited via arxiv URL and via the
-  // CHI portal, for example. If so, merge them.
-  dedupeAcrossExternalIds(papers, canonicalId);
-
-  await chrome.storage.local.set({ [PAPERS_KEY]: papers });
+    // Now that we know this paper's external IDs (DOI / ArXiv / etc.), check
+    // whether any other entry in the library is the same paper under a
+    // different canonical ID — same paper visited via arxiv URL and via the
+    // CHI portal, for example. If so, merge them.
+    dedupeAcrossExternalIds(papers, canonicalId);
+  });
 }
 
 /**
@@ -394,10 +383,9 @@ async function runEnrichmentOnce(canonicalId, force = false) {
  * Called after backfill, on browser startup, and on extension install.
  */
 async function retryStuckEnrichments() {
-  const store = await chrome.storage.local.get(PAPERS_KEY);
-  const papers = store[PAPERS_KEY] || {};
+  const papers = await PaperStore.all();
   const now = Date.now();
-  for (const p of Object.values(papers)) {
+  for (const p of papers.values()) {
     if (needsEnrichment(p, now)) scheduleEnrichment(p.id);
   }
 }
@@ -497,35 +485,38 @@ function dedupeAcrossExternalIds(papers, paperId) {
  * the entry to its proper canonical ID — merging if that paper already
  * exists — and resets enrichment so real metadata gets fetched.
  */
-async function reclassifyGenericPdfs() {
-  const store = await chrome.storage.local.get(PAPERS_KEY);
-  const papers = store[PAPERS_KEY] || {};
-  let changed = false;
-
+function findInObject(papers, canonicalId) {
+  if (papers[canonicalId]) return papers[canonicalId];
   for (const p of Object.values(papers)) {
-    if (p.source !== 'pdf' || !p.url) continue;
-    const cls = classifyPaper(p.url);
-    if (!cls || cls.source === 'pdf' || cls.canonicalId === p.id) continue;
-
-    delete papers[p.id];
-    const existing = findExistingPaper(papers, cls.canonicalId);
-    if (existing) {
-      mergePapers(existing, p);
-    } else {
-      const aliases = new Set(p.aliases || []);
-      aliases.add(p.id);
-      p.aliases = [...aliases];
-      p.id = cls.canonicalId;
-      p.source = cls.source;
-      p.sourceId = cls.sourceId;
-      if (cls.doi && !p.doi) p.doi = cls.doi;
-      p.enrichmentStatus = 'pending';
-      papers[cls.canonicalId] = p;
-    }
-    changed = true;
+    if (Array.isArray(p.aliases) && p.aliases.includes(canonicalId)) return p;
   }
+  return null;
+}
 
-  if (changed) await chrome.storage.local.set({ [PAPERS_KEY]: papers });
+async function reclassifyGenericPdfs() {
+  await PaperStore.edit((papers) => {
+    for (const p of Object.values(papers)) {
+      if (p.source !== 'pdf' || !p.url) continue;
+      const cls = classifyPaper(p.url);
+      if (!cls || cls.source === 'pdf' || cls.canonicalId === p.id) continue;
+
+      delete papers[p.id];
+      const existing = findInObject(papers, cls.canonicalId);
+      if (existing) {
+        mergePapers(existing, p);
+      } else {
+        const aliases = new Set(p.aliases || []);
+        aliases.add(p.id);
+        p.aliases = [...aliases];
+        p.id = cls.canonicalId;
+        p.source = cls.source;
+        p.sourceId = cls.sourceId;
+        if (cls.doi && !p.doi) p.doi = cls.doi;
+        p.enrichmentStatus = 'pending';
+        papers[cls.canonicalId] = p;
+      }
+    }
+  });
 }
 
 /**
@@ -534,22 +525,14 @@ async function reclassifyGenericPdfs() {
  * fill in a real one.
  */
 async function cleanupJunkTitles() {
-  const store = await chrome.storage.local.get(PAPERS_KEY);
-  const papers = store[PAPERS_KEY] || {};
-  let changed = false;
-  for (const p of Object.values(papers)) {
-    if (p.title && looksLikeErrorPage(p.title)) {
-      p.title = null;
-      changed = true;
+  await PaperStore.edit((papers) => {
+    for (const p of Object.values(papers)) {
+      if (p.title && looksLikeErrorPage(p.title)) p.title = null;
+      // Entries the classifier would now reject (e.g. "arxiv:TODO" from a
+      // placeholder link) can never be enriched; drop them.
+      if (p.source === 'arxiv' && !isValidArxivId(p.sourceId)) delete papers[p.id];
     }
-    // Entries the classifier would now reject (e.g. "arxiv:TODO" from a
-    // placeholder link) can never be enriched; drop them.
-    if (p.source === 'arxiv' && !isValidArxivId(p.sourceId)) {
-      delete papers[p.id];
-      changed = true;
-    }
-  }
-  if (changed) await chrome.storage.local.set({ [PAPERS_KEY]: papers });
+  });
 }
 
 // ─── Event listeners ──────────────────────────────────────────────────────────
@@ -622,17 +605,26 @@ backfillExistingTabs().then(() => retryStuckEnrichments());
 
 const VAULT_SYNC_HOST = 'com.xiaoan.paperclip';
 const VAULT_SYNC_ALARM = 'vault-sync';
+const VAULT_PULL_ALARM = 'vault-pull';
 const VAULT_SYNC_DEBOUNCE_MIN = 0.5;
+// Syncs not caused by a local change (new-tab opens, worker startup) only
+// pull vault-side edits, so they run at most this often. Each sync sends the
+// whole library to a freshly spawned host process.
+const VAULT_PULL_INTERVAL_MS = 10 * 60 * 1000;
 
 function scheduleVaultSync(delayMinutes = VAULT_SYNC_DEBOUNCE_MIN) {
   chrome.alarms.create(VAULT_SYNC_ALARM, { delayInMinutes: delayMinutes });
 }
 
-async function syncToVault() {
+async function syncToVault({ ifStale = false } = {}) {
   try {
-    const store = await chrome.storage.local.get([PAPERS_KEY, 'tags']);
-    const papers = store[PAPERS_KEY] || {};
-    const tags = store.tags || {};
+    if (ifStale) {
+      const { vaultSyncedAt = 0 } = await chrome.storage.session.get('vaultSyncedAt');
+      if (Date.now() - vaultSyncedAt < VAULT_PULL_INTERVAL_MS) return;
+    }
+    await chrome.storage.session.set({ vaultSyncedAt: Date.now() });
+    const papers = await PaperStore.toObject();
+    const { tags = {} } = await chrome.storage.local.get('tags');
     const library = {
       schema: 'paperclip.library.v2',
       exportedAt: new Date().toISOString(),
@@ -656,57 +648,61 @@ async function syncToVault() {
 // are empty — the cycle terminates by convergence, not by suppression.
 async function applyVaultReply(reply) {
   if (reply.membership) {
-    chrome.storage.local.set({ corpusMembership: reply.membership });
+    // Usually unchanged between syncs; skip the write when it is.
+    const { corpusMembership } = await chrome.storage.local.get('corpusMembership');
+    if (JSON.stringify(corpusMembership) !== JSON.stringify(reply.membership)) {
+      await chrome.storage.local.set({ corpusMembership: reply.membership });
+    }
   }
   const deltas = reply.vaultDeltas || {};
   const paperEdits = deltas.papers || {};
   const newTags = deltas.tags || {};
   const removeTags = deltas.removeTags || [];
   if (!Object.keys(paperEdits).length && !Object.keys(newTags).length && !removeTags.length) return;
-  const store = await chrome.storage.local.get([PAPERS_KEY, 'tags']);
-  const papers = store[PAPERS_KEY] || {};
-  const tags = store.tags || {};
-  let touched = false;
-  for (const [id, fields] of Object.entries(paperEdits)) {
-    if (papers[id]) {
-      Object.assign(papers[id], fields);
-      touched = true;
-    }
-  }
+  const { tags = {} } = await chrome.storage.local.get('tags');
+  let tagsTouched = false;
   for (const [tid, tag] of Object.entries(newTags)) {
     if (!tags[tid]) {
       tags[tid] = tag;
-      touched = true;
+      tagsTouched = true;
     }
   }
   for (const tid of removeTags) {
     if (tags[tid]) {
       delete tags[tid];
-      touched = true;
-    }
-    for (const p of Object.values(papers)) {
-      if (Array.isArray(p.tags) && p.tags.includes(tid)) {
-        p.tags = p.tags.filter((t) => t !== tid);
-        touched = true;
-      }
+      tagsTouched = true;
     }
   }
-  if (touched) await chrome.storage.local.set({ [PAPERS_KEY]: papers, tags });
+  await PaperStore.edit((papers) => {
+    for (const [id, fields] of Object.entries(paperEdits)) {
+      if (papers[id]) Object.assign(papers[id], fields);
+    }
+    for (const tid of removeTags) {
+      for (const p of Object.values(papers)) {
+        if (Array.isArray(p.tags) && p.tags.includes(tid)) {
+          p.tags = p.tags.filter((t) => t !== tid);
+        }
+      }
+    }
+  });
+  if (tagsTouched) await chrome.storage.local.set({ tags });
 }
 
 chrome.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local' && (changes[PAPERS_KEY] || changes.tags)) scheduleVaultSync();
+  if (area !== 'local') return;
+  if (changes.tags || Object.keys(changes).some(PaperStore.isPaperKey)) scheduleVaultSync();
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === VAULT_SYNC_ALARM) syncToVault();
+  if (alarm.name === VAULT_PULL_ALARM) syncToVault({ ifStale: true });
 });
 
 // New-tab opens already ping us for a backfill; ride the same signal to pull
-// vault-side edits promptly (the worker is awake, no alarm needed).
+// vault-side edits (the worker is awake, no alarm needed).
 chrome.runtime.onMessage.addListener((msg) => {
-  if (msg && msg.type === 'paperclip:backfill') syncToVault();
+  if (msg && msg.type === 'paperclip:backfill') syncToVault({ ifStale: true });
 });
 
 // Catch anything missed while the browser was closed.
-scheduleVaultSync(1);
+chrome.alarms.create(VAULT_PULL_ALARM, { delayInMinutes: 1 });

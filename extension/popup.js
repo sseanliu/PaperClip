@@ -6,8 +6,6 @@
  */
 
 (async function () {
-  const PAPERS_KEY = 'papers';
-
   const currentEl = document.getElementById('popupCurrent');
   const searchEl = document.getElementById('popupSearch');
   const listEl = document.getElementById('popupList');
@@ -50,8 +48,7 @@
   currentEl.textContent = title;
   currentEl.title = url;
 
-  const store = await chrome.storage.local.get(PAPERS_KEY);
-  const papers = Object.values(store[PAPERS_KEY] || {});
+  const papers = [...(await PaperStore.all()).values()];
   papers.sort((a, b) => (b.firstSeenAt || '').localeCompare(a.firstSeenAt || ''));
 
   if (papers.length === 0) {
@@ -165,30 +162,26 @@
     if (!btn) return;
     const paperId = btn.dataset.id;
 
-    const s = await chrome.storage.local.get(PAPERS_KEY);
-    const ps = s[PAPERS_KEY] || {};
-    const paper = ps[paperId];
+    const paper = await PaperStore.update(paperId, (p) => {
+      p.attachments = p.attachments || [];
+      let mutated = false;
+      if (!p.attachments.some(a => a.url === url)) {
+        p.attachments.push({
+          url,
+          title,
+          addedAt: new Date().toISOString(),
+        });
+        mutated = true;
+      }
+      // Linking a URL is a strong signal of interest — auto-star the paper if
+      // it isn't starred yet.
+      if (!p.starred) {
+        p.starred = true;
+        mutated = true;
+      }
+      return mutated;
+    });
     if (!paper) return;
-
-    paper.attachments = paper.attachments || [];
-    let mutated = false;
-    if (!paper.attachments.some(a => a.url === url)) {
-      paper.attachments.push({
-        url,
-        title,
-        addedAt: new Date().toISOString(),
-      });
-      mutated = true;
-    }
-    // Linking a URL is a strong signal of interest — auto-star the paper if
-    // it isn't starred yet.
-    if (!paper.starred) {
-      paper.starred = true;
-      mutated = true;
-    }
-    if (mutated) {
-      await chrome.storage.local.set({ [PAPERS_KEY]: ps });
-    }
 
     btn.classList.add('is-saved');
     btn.querySelector('.popup-paper-meta').textContent = 'Saved';

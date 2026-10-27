@@ -15,7 +15,6 @@ import * as pdfjsLib from './vendor/pdf.min.mjs';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = './vendor/pdf.worker.min.mjs';
 
-const PAPERS_KEY = 'papers';
 const THUMB_PREFIX = 'thumb:';
 const FAIL_PREFIX = 'thumbfail:';
 const FAIL_RETRY_MS = 7 * 24 * 60 * 60 * 1000; // retry failures after a week
@@ -94,8 +93,7 @@ async function processQueue() {
   running = true;
   try {
     await sweepStaleVersion();
-    const store = await chrome.storage.local.get(PAPERS_KEY);
-    const papers = store[PAPERS_KEY] || {};
+    const papers = await PaperStore.toObject();
     await pruneOrphans(papers);
 
     for (const p of Object.values(papers)) {
@@ -130,8 +128,7 @@ async function processQueue() {
 
 // New papers arriving (capture / backfill / enrichment) should get thumbs too.
 let kickTimer = null;
-chrome.storage.onChanged.addListener((changes, area) => {
-  if (area !== 'local' || !changes[PAPERS_KEY]) return;
+PaperStore.onChange(() => {
   clearTimeout(kickTimer);
   kickTimer = setTimeout(processQueue, 2000);
 });
