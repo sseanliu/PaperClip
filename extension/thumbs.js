@@ -9,8 +9,10 @@
  *
  * Blobs stay on disk until an <img> shows them, so a page holds object URLs
  * rather than ~90 KB base64 strings per paper. Only one open page works the
- * queue at a time (Web Lock); pages hear about new thumbnails over a
- * BroadcastChannel and load just those records.
+ * queue at a time (Web Lock), and only while it is visible: a background tab
+ * gets throttled or frozen by Chrome and would hold the lock without making
+ * progress. Pages hear about new thumbnails over a BroadcastChannel and load
+ * just those records.
  *
  * app.js reads window.PaperThumbs: ready, urlFor(id, size), onChange(fn).
  */
@@ -26,6 +28,10 @@ const ARXIV_API_GAP_MS = 3000; // arXiv asks for one API call per 3 seconds
 const LARGE_WIDTH = 480; // 2x of the ~240px max display size (gallery cards)
 const SMALL_WIDTH = 120; // list rows show 44px-wide thumbnails
 const THROTTLE_MS = 800;
+// Every network step is bounded: one request that never answers would
+// otherwise stall the whole queue while its page holds the lock.
+const NET_TIMEOUT_MS = 20 * 1000;
+const RENDER_TIMEOUT_MS = 60 * 1000;
 
 // Bump to invalidate every cached thumbnail (e.g. after a size change); the
 // queue then re-renders them all.
@@ -213,7 +219,9 @@ const BLOCKING_HOSTS = /(^|\.)(dl\.acm\.org|ieeexplore\.ieee\.org|openreview\.ne
  * that serve PDFs to scripts. Returns null when there is none.
  */
 async function findOpenPdf(doi) {
-  const r = await fetch(`https://api.openalex.org/works/doi:${encodeURIComponent(doi)}?select=locations`);
+  const r = await fetch(`https://api.openalex.org/works/doi:${encodeURIComponent(doi)}?select=locations`, {
+    signal: AbortSignal.timeout(NET_TIMEOUT_MS),
+  });
   if (r.status === 404) return null;
   if (!r.ok) throw new Error(`openalex: HTTP ${r.status}`);
   const json = await r.json();
@@ -251,7 +259,9 @@ async function findArxivByTitle(title) {
   const want = titleWords(title);
   const terms = [...want].sort((a, b) => b.length - a.length).slice(0, 8);
   const query = terms.map(w => `ti:${w}`).join(' AND ');
-  const r = await fetch(`https://export.arxiv.org/api/query?search_query=${encodeURIComponent(query)}&max_results=10`);
+  const r = await fetch(`https://export.arxiv.org/api/query?search_query=${encodeURIComponent(query)}&max_results=10`, {
+    signal: AbortSignal.timeout(NET_TIMEOUT_MS),
+  });
   if (!r.ok) throw new Error(`arxiv search: HTTP ${r.status}`);
   const xml = await r.text();
   let best = null;
@@ -294,26 +304,36 @@ async function renderFirstPage(pdfUrl) {
     disableAutoFetch: true,
     rangeChunkSize: 262144,
   });
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`timed out after ${RENDER_TIMEOUT_MS / 1000}s`)), RENDER_TIMEOUT_MS);
+  });
   try {
-    const doc = await task.promise;
-    const page = await doc.getPage(1);
-    const base = page.getViewport({ scale: 1 });
-    const viewport = page.getViewport({ scale: LARGE_WIDTH / base.width });
-
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.ceil(viewport.width);
-    canvas.height = Math.ceil(viewport.height);
-    const ctx = canvas.getContext('2d', { alpha: false });
-    ctx.fillStyle = '#ffffff';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-    await page.render({ canvasContext: ctx, viewport }).promise;
-    const large = await new Promise(r => canvas.toBlob(r, 'image/webp', 0.8));
-    const small = await shrink(canvas);
-    return { large, small };
+    return await Promise.race([drawFirstPage(task), timeout]);
   } finally {
+    clearTimeout(timer);
+    // Also aborts a download or render still in flight after a timeout.
     try { await task.destroy(); } catch {}
   }
+}
+
+async function drawFirstPage(task) {
+  const doc = await task.promise;
+  const page = await doc.getPage(1);
+  const base = page.getViewport({ scale: 1 });
+  const viewport = page.getViewport({ scale: LARGE_WIDTH / base.width });
+
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.ceil(viewport.width);
+  canvas.height = Math.ceil(viewport.height);
+  const ctx = canvas.getContext('2d', { alpha: false });
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  await page.render({ canvasContext: ctx, viewport }).promise;
+  const large = await new Promise(r => canvas.toBlob(r, 'image/webp', 0.8));
+  const small = await shrink(canvas);
+  return { large, small };
 }
 
 /**
@@ -369,7 +389,12 @@ async function workQueue() {
     announce(orphans, orphans.map(() => null));
   }
 
-  for (let p of [...papers.values()]) {
+  // Newest first, so a paper you just opened isn't waiting behind retries.
+  const order = [...papers.values()].sort((a, b) =>
+    (b.firstSeenAt || '').localeCompare(a.firstSeenAt || ''));
+  for (let p of order) {
+    // Hand the queue to whichever page is visible next.
+    if (document.hidden) return;
     const rec = records.get(p.id);
     const current = rec && rec.v === THUMB_VERSION;
     if (current && (rec.small || rec.large)) continue;
@@ -430,6 +455,7 @@ async function workQueue() {
 }
 
 async function processQueue() {
+  if (document.hidden) return;
   if (running) { rerunRequested = true; return; }
   running = true;
   try {
@@ -453,6 +479,12 @@ let kickTimer = null;
 PaperStore.onChange(() => {
   clearTimeout(kickTimer);
   kickTimer = setTimeout(processQueue, 2000);
+});
+
+// A page that became visible picks up the queue (another page may have
+// stopped when it went to the background).
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) processQueue();
 });
 
 processQueue();
