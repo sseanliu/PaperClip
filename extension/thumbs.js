@@ -137,16 +137,61 @@ window.PaperThumbs = {
 
 // ─── Rendering ──────────────────────────────────────────────────────────────
 
+/**
+ * Direct-download form of a link to a PDF: GitHub and Dropbox links usually
+ * point at a preview page, and a #page= fragment is only for the viewer.
+ */
+function directPdfUrl(raw) {
+  let u;
+  try { u = new URL(raw); } catch { return null; }
+  u.hash = '';
+  const host = u.hostname.replace(/^www\./, '');
+  if (!/\.pdf$/i.test(u.pathname)) return null;
+  // github.com/<owner>/<repo>/blob/<ref>/<path>.pdf → .../raw/<ref>/<path>.pdf
+  if (host === 'github.com') {
+    u.pathname = u.pathname.replace(/^(\/[^/]+\/[^/]+)\/blob\//, '$1/raw/');
+    return u.href;
+  }
+  if (host === 'dropbox.com') {
+    if (u.pathname.startsWith('/preview/')) return null; // needs the owner's session
+    u.searchParams.set('dl', '1');
+    return u.href;
+  }
+  return u.href;
+}
+
 /** Resolve a fetchable PDF URL for a paper, or null if we don't know one. */
 export function pdfUrlFor(p) {
   if (!p) return null;
   if (p.source === 'arxiv' && p.sourceId) return `https://arxiv.org/pdf/${p.sourceId}`;
+  // A known arXiv version beats publisher sites, which mostly block scripted
+  // downloads (ACM, IEEE, OpenReview) or sit behind a paywall.
+  const arxivId = p.externalIds && p.externalIds.ArXiv;
+  if (arxivId) return `https://arxiv.org/pdf/${arxivId}`;
   if (p.source === 'openreview' && p.sourceId) return `https://openreview.net/pdf?id=${encodeURIComponent(p.sourceId)}`;
-  if (p.url && /\.pdf(?:$|\?)/i.test(p.url)) return p.url;
+  const url = p.url || '';
+  const direct = directPdfUrl(url);
+  if (direct) return direct;
   // CVF html page → sibling pdf
-  if (p.source === 'cvf' && p.url && /\.html$/i.test(p.url)) {
-    return p.url.replace('/html/', '/papers/').replace(/\.html$/i, '.pdf');
+  if (p.source === 'cvf' && /\.html$/i.test(url)) {
+    return url.replace('/html/', '/papers/').replace(/\.html$/i, '.pdf');
   }
+  // NeurIPS abstract page …/hash/<h>-Abstract[-Track].html → …/file/<h>-Paper[-Track].pdf
+  if (p.source === 'nips') {
+    const m = url.match(/^(.*\/paper_files\/paper\/\d{4})\/hash\/([0-9a-f]+)-Abstract(-[\w]+)?\.html/i);
+    if (m) return `${m[1]}/file/${m[2]}-Paper${m[3] || ''}.pdf`;
+  }
+  // PMLR proceedings.mlr.press/v202/gao23h[.html] → /v202/gao23h/gao23h.pdf
+  if (p.source === 'mlr') {
+    const m = url.match(/^https?:\/\/proceedings\.mlr\.press\/(v\d+)\/([\w-]+?)(?:\.html)?\/?(?:[?#].*)?$/i);
+    if (m) return `https://proceedings.mlr.press/${m[1]}/${m[2]}/${m[2]}.pdf`;
+  }
+  // Nature research articles (s41…) have a .pdf sibling; news pieces (d41…) don't.
+  if (p.source === 'nature' && /^s4/i.test(p.sourceId || '')) {
+    return `https://www.nature.com/articles/${p.sourceId.replace(/\.e?pdf$/i, '')}.pdf`;
+  }
+  // Open-access copy found by DOI (see findOpenPdf below).
+  if (p.openPdfUrl) return p.openPdfUrl;
   return null;
 }
 
@@ -245,7 +290,9 @@ async function workQueue() {
     const rec = records.get(p.id);
     if (rec && rec.v === THUMB_VERSION) {
       if (rec.small || rec.large) continue;
-      if (rec.failedAt && Date.now() - rec.failedAt < FAIL_RETRY_MS) continue;
+      // A failure is retried after a week, or at once if the URL we would
+      // try has changed (new link rules, an arXiv version found later).
+      if (rec.failedAt && rec.url === url && Date.now() - rec.failedAt < FAIL_RETRY_MS) continue;
     }
 
     let next;
@@ -253,7 +300,7 @@ async function workQueue() {
       next = { id: p.id, v: THUMB_VERSION, ...(await renderFirstPage(url)) };
     } catch (err) {
       console.warn('[paperclip] thumbnail failed', p.id, err && err.message);
-      next = { id: p.id, v: THUMB_VERSION, failedAt: Date.now() };
+      next = { id: p.id, v: THUMB_VERSION, failedAt: Date.now(), url };
     }
     await putRecord(next);
     announce([p.id], [next]);
