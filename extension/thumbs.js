@@ -21,6 +21,8 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = './vendor/pdf.worker.min.mjs';
 
 const FAIL_RETRY_MS = 7 * 24 * 60 * 60 * 1000; // retry failures after a week
 const OPEN_PDF_RECHECK_MS = 30 * 24 * 60 * 60 * 1000; // re-ask OpenAlex monthly
+const ARXIV_TITLE_RECHECK_MS = 30 * 24 * 60 * 60 * 1000;
+const ARXIV_API_GAP_MS = 3000; // arXiv asks for one API call per 3 seconds
 const LARGE_WIDTH = 480; // 2x of the ~240px max display size (gallery cards)
 const SMALL_WIDTH = 120; // list rows show 44px-wide thumbnails
 const THROTTLE_MS = 800;
@@ -166,8 +168,9 @@ export function pdfUrlFor(p) {
   if (!p) return null;
   if (p.source === 'arxiv' && p.sourceId) return `https://arxiv.org/pdf/${p.sourceId}`;
   // A known arXiv version beats publisher sites, which mostly block scripted
-  // downloads (ACM, IEEE, OpenReview) or sit behind a paywall.
-  const arxivId = p.externalIds && p.externalIds.ArXiv;
+  // downloads (ACM, IEEE, OpenReview) or sit behind a paywall. It comes from
+  // enrichment, or from a title search once the paper's own link failed.
+  const arxivId = (p.externalIds && p.externalIds.ArXiv) || p.arxivTitleMatch;
   if (arxivId) return `https://arxiv.org/pdf/${arxivId}`;
   if (p.source === 'openreview' && p.sourceId) return `https://openreview.net/pdf?id=${encodeURIComponent(p.sourceId)}`;
   const url = p.url || '';
@@ -221,6 +224,60 @@ async function findOpenPdf(doi) {
   };
   urls.sort((a, b) => rank(a) - rank(b));
   return urls[0] || null;
+}
+
+const TITLE_STOPWORDS = new Set('a an the of for and or in on to with via by from at as is are be its into using towards toward'.split(' '));
+
+function titleWords(title) {
+  return new Set(((title || '').toLowerCase().match(/[a-z0-9]+/g) || []).filter(w => !TITLE_STOPWORDS.has(w)));
+}
+
+function canSearchArxivTitle(p) {
+  if (p.source === 'arxiv' || (p.externalIds && p.externalIds.ArXiv)) return false;
+  if (p.arxivTitleCheckedAt && Date.now() - p.arxivTitleCheckedAt < ARXIV_TITLE_RECHECK_MS) return false;
+  // Skip "<Source>:<id>" placeholders and one- or two-word page titles
+  // ("Dropbox"), which can't identify a paper.
+  if (/^[\w ]+:\S+$/.test(p.title || '')) return false;
+  return titleWords(p.title).size >= 3;
+}
+
+/**
+ * The arXiv ID of a paper with (nearly) the same title, or null. Camera-ready
+ * ACM / IEEE / OpenReview papers often have a preprint there, sometimes with
+ * a slightly different title, so candidates from a keyword search are scored
+ * by word overlap (Jaccard over non-stopwords) and accepted at 0.8.
+ */
+async function findArxivByTitle(title) {
+  const want = titleWords(title);
+  const terms = [...want].sort((a, b) => b.length - a.length).slice(0, 8);
+  const query = terms.map(w => `ti:${w}`).join(' AND ');
+  const r = await fetch(`https://export.arxiv.org/api/query?search_query=${encodeURIComponent(query)}&max_results=10`);
+  if (!r.ok) throw new Error(`arxiv search: HTTP ${r.status}`);
+  const xml = await r.text();
+  let best = null;
+  let bestScore = 0;
+  for (const entry of xml.match(/<entry>[\s\S]*?<\/entry>/g) || []) {
+    const t = (entry.match(/<title>([\s\S]*?)<\/title>/) || [])[1];
+    const id = (entry.match(/<id>https?:\/\/arxiv\.org\/abs\/([^<]+)<\/id>/) || [])[1];
+    if (!t || !id) continue;
+    const got = titleWords(t);
+    const shared = [...want].filter(w => got.has(w)).length;
+    const score = shared / (want.size + got.size - shared);
+    if (score > bestScore) {
+      bestScore = score;
+      best = id.replace(/v\d+$/, '');
+    }
+  }
+  return bestScore >= 0.8 ? best : null;
+}
+
+async function tryRender(p, url) {
+  try {
+    return { id: p.id, v: THUMB_VERSION, ...(await renderFirstPage(url)) };
+  } catch (err) {
+    console.warn('[paperclip] thumbnail failed', p.id, err && err.message);
+    return { id: p.id, v: THUMB_VERSION, failedAt: Date.now(), url };
+  }
 }
 
 async function shrink(source) {
@@ -313,6 +370,10 @@ async function workQueue() {
   }
 
   for (let p of [...papers.values()]) {
+    const rec = records.get(p.id);
+    const current = rec && rec.v === THUMB_VERSION;
+    if (current && (rec.small || rec.large)) continue;
+
     let url = pdfUrlFor(p);
     // No PDF link from the source page (ACM, IEEE, paywalled publishers):
     // ask OpenAlex for an open copy and remember the answer on the paper,
@@ -333,22 +394,35 @@ async function workQueue() {
       url = pdfUrlFor(p);
       await new Promise(r => setTimeout(r, THROTTLE_MS));
     }
-    if (!url) continue;
-    const rec = records.get(p.id);
-    if (rec && rec.v === THUMB_VERSION) {
-      if (rec.small || rec.large) continue;
-      // A failure is retried after a week, or at once if the URL we would
-      // try has changed (new link rules, an arXiv version found later).
-      if (rec.failedAt && rec.url === url && Date.now() - rec.failedAt < FAIL_RETRY_MS) continue;
+
+    // A failure is retried after a week, or at once if the URL we would try
+    // has changed (new link rules, an open copy found later).
+    const knownBad = current && rec.failedAt && rec.url === url;
+    let next = null;
+    if (url && !(knownBad && Date.now() - rec.failedAt < FAIL_RETRY_MS)) {
+      next = await tryRender(p, url);
     }
 
-    let next;
-    try {
-      next = { id: p.id, v: THUMB_VERSION, ...(await renderFirstPage(url)) };
-    } catch (err) {
-      console.warn('[paperclip] thumbnail failed', p.id, err && err.message);
-      next = { id: p.id, v: THUMB_VERSION, failedAt: Date.now(), url };
+    // Last resort: the same title on arXiv, for papers with no PDF link or a
+    // link that fails (bot-blocked publishers, paywalls, expired links).
+    if ((!url || knownBad || (next && next.failedAt)) && canSearchArxivTitle(p)) {
+      let match;
+      try {
+        match = await findArxivByTitle(p.title);
+      } catch (err) {
+        console.warn('[paperclip] arXiv title search failed', p.id, err && err.message);
+      }
+      if (match !== undefined) {
+        p = (await PaperStore.update(p.id, (x) => {
+          x.arxivTitleMatch = match;
+          x.arxivTitleCheckedAt = Date.now();
+        })) || p;
+        if (match) next = await tryRender(p, pdfUrlFor(p));
+      }
+      await new Promise(r => setTimeout(r, ARXIV_API_GAP_MS));
     }
+
+    if (!next) continue;
     await putRecord(next);
     announce([p.id], [next]);
     await new Promise(r => setTimeout(r, THROTTLE_MS));
