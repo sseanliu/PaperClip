@@ -284,10 +284,27 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && isOpen()) close();
 });
 
+/**
+ * The reader has no visible frame, so a click on the open space beside the
+ * pages closes it like a backdrop click. Clicks on a page, the toolbar or a
+ * side pane don't, and neither does finishing a text selection.
+ */
+function closeOnOpenSpace(e) {
+  if (!bodyEl.classList.contains('is-lector')) return;
+  if (window.getSelection && window.getSelection().toString()) return;
+  if (e.target.closest('.lector-toolbar, .lector-thumbs, .lector-search-pane, a, button, input')) return;
+  for (const canvas of bodyEl.querySelectorAll('.lector-pages canvas')) {
+    const r = canvas.getBoundingClientRect();
+    if (e.clientX >= r.left && e.clientX <= r.right && e.clientY >= r.top && e.clientY <= r.bottom) return;
+  }
+  close();
+}
+
 document.addEventListener('DOMContentLoaded', () => {
   if (!els()) return;
   document.getElementById('pdfPanelClose').addEventListener('click', close);
   if (backdrop) backdrop.addEventListener('click', close);
+  bodyEl.addEventListener('click', closeOnOpenSpace);
   openTabBtn.addEventListener('click', () => {
     if (currentUrl) chrome.tabs.create({ url: currentUrl });
   });
