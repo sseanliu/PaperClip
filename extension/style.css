@@ -1482,7 +1482,10 @@ body.pdf-panel-open {
   outline: none;
 }
 
-.lector-pages canvas {
+/* On the page box, not its canvases: zoomed in, Lector layers a detail
+   canvas over just the visible region, and a shadow on that showed up as a
+   stray rectangle edge mid-page while scrolling. */
+.lector-page {
   box-shadow: 0 6px 24px var(--popover-shadow);
 }
 

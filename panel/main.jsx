@@ -386,7 +386,7 @@ function Viewer({ url, onError, pageWidth = 1000, title, onClose, onOpenTab }) {
               </Thumbnails>
             )}
             <Pages className="lector-pages">
-              <Page>
+              <Page className="lector-page">
                 <CanvasLayer />
                 <TextLayer />
                 <AnnotationLayer />
