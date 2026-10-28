@@ -232,16 +232,14 @@ function InitialZoom({ pageWidth }) {
   return null;
 }
 
-// The toolbar floats over the top of the paper and hides while you read. It
-// comes back when the pointer nears the top edge, stays while hovered or
-// while one of its inputs has focus, and shows briefly when a paper opens so
-// it's discoverable.
+// The toolbar floats over the top of the paper and stays hidden while you
+// read. It shows when the pointer nears the top edge, and stays while hovered
+// or while one of its inputs has focus.
 const TOOLBAR_REVEAL_PX = 96;
 const TOOLBAR_HIDE_MS = 1200;
-const TOOLBAR_FIRST_SHOW_MS = 2500;
 
 function useAutoHideToolbar() {
-  const [shown, setShown] = useState(true);
+  const [shown, setShown] = useState(false);
   const hovering = useRef(false);
   const timer = useRef(0);
   const scheduleHide = useCallback((ms = TOOLBAR_HIDE_MS) => {
@@ -252,10 +250,7 @@ function useAutoHideToolbar() {
       setShown(false);
     }, ms);
   }, []);
-  useEffect(() => {
-    scheduleHide(TOOLBAR_FIRST_SHOW_MS);
-    return () => clearTimeout(timer.current);
-  }, [scheduleHide]);
+  useEffect(() => () => clearTimeout(timer.current), []);
   const onMouseMove = useCallback(
     (e) => {
       if (e.clientY - e.currentTarget.getBoundingClientRect().top < TOOLBAR_REVEAL_PX) {
