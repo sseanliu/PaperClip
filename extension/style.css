@@ -1115,6 +1115,8 @@ footer {
   bottom: 24px;
   left: 50%;
   width: min(var(--reader-w), calc(100vw - 48px));
+  /* viewer.js widens the window inline as you zoom in; never past the screen. */
+  max-width: calc(100vw - 48px);
   transform: translateX(-50%);
   display: flex;
   flex-direction: column;
@@ -1125,6 +1127,7 @@ footer {
   box-shadow: 0 24px 80px var(--popover-shadow);
   z-index: 250;
   animation: pdf-panel-in 0.22s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: width 0.16s ease-out;
 }
 
 /* The library stays put underneath; only the reader scrolls. */
@@ -1172,6 +1175,7 @@ body.pdf-panel-resizing {
 
 body.pdf-panel-resizing .pdf-panel {
   animation: none;
+  transition: none;
 }
 
 /* The explicit display:flex above would otherwise override the hidden

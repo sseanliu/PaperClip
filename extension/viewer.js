@@ -135,6 +135,29 @@ function focusReader(tries = 20) {
   }
 }
 
+/**
+ * Zooming in grows the reader window with the page until it reaches the
+ * screen edges; only past that does the page crop inside the window (and
+ * scroll sideways). Fit-to-width, or zooming back out, returns the window to
+ * its set width (--reader-w).
+ */
+function fitWindowToZoom({ fit, pageWidth }) {
+  if (!panel || panel.hidden) return;
+  if (fit) {
+    panel.style.width = '';
+    return;
+  }
+  const pages = bodyEl.querySelector('.lector-pages');
+  if (!pages) return;
+  // Everything in the window besides the page column: borders, scrollbar,
+  // the thumbnail strip or search pane when open.
+  const chrome = panel.getBoundingClientRect().width - pages.clientWidth;
+  const base = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--reader-w')) || 1000;
+  const max = window.innerWidth - 48;
+  const want = Math.ceil(pageWidth + chrome);
+  panel.style.width = want > Math.min(base, max) ? `${Math.min(max, want)}px` : '';
+}
+
 async function open(paper, { focus = false } = {}) {
   if (!els() || !paper) return;
 
@@ -171,6 +194,7 @@ async function open(paper, { focus = false } = {}) {
     bodyEl.appendChild(holder);
     lectorHolder = holder;
     window.LectorPanel.mount(holder, url, {
+      onZoom: fitWindowToZoom,
       onError: () => {
         if (generation !== renderGeneration) return;
         teardownLector();
@@ -258,6 +282,7 @@ async function openFrameOrCanvas(url, generation) {
 async function close() {
   if (!els()) return;
   panel.hidden = true;
+  panel.style.width = '';
   if (backdrop) backdrop.hidden = true;
   document.body.classList.remove('pdf-panel-open');
   currentPaperId = null;
@@ -314,6 +339,7 @@ function initResizer() {
     handle.addEventListener('mousedown', (e) => {
       e.preventDefault();
       document.body.classList.add('pdf-panel-resizing');
+      panel.style.width = ''; // the drag sets the base width; drop any zoom growth
       let width = panel.getBoundingClientRect().width;
 
       // Either edge moves symmetrically: width is twice the distance from

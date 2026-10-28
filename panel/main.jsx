@@ -212,7 +212,21 @@ function SelectionRects({ pageNumber }) {
   );
 }
 
-function Viewer({ url, onError }) {
+// Reports the zoom so the reader window (viewer.js) can grow with the page.
+// Viewports are at scale 1, so a page renders viewport.width * zoom wide.
+function ZoomReporter({ onZoom }) {
+  const zoom = usePdf((s) => s.zoom);
+  const fit = usePdf((s) => s.isZoomFitWidth);
+  const viewports = usePdf((s) => s.viewports);
+  useEffect(() => {
+    if (!onZoom || !viewports || !viewports.length) return;
+    const widest = Math.max(...viewports.map((v) => v.width));
+    onZoom({ fit, pageWidth: widest * zoom });
+  }, [zoom, fit, viewports, onZoom]);
+  return null;
+}
+
+function Viewer({ url, onError, onZoom }) {
   const [showThumbs, setShowThumbs] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   return (
@@ -229,6 +243,7 @@ function Viewer({ url, onError }) {
       loader={<div className="lector-loading">Loading PDF…</div>}
     >
       <SelectionWatcher />
+      <ZoomReporter onZoom={onZoom} />
       <Search>
         <div className="lector-shell">
           <div className="lector-toolbar">
@@ -311,11 +326,11 @@ function Viewer({ url, onError }) {
 const roots = new WeakMap();
 
 window.LectorPanel = {
-  mount(container, url, { onError } = {}) {
+  mount(container, url, { onError, onZoom } = {}) {
     this.unmount(container);
     const root = createRoot(container);
     roots.set(container, root);
-    root.render(<Viewer url={url} onError={onError} />);
+    root.render(<Viewer url={url} onError={onError} onZoom={onZoom} />);
   },
   unmount(container) {
     const root = roots.get(container);
