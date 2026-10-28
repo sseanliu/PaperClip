@@ -1,13 +1,14 @@
 /**
- * viewer.js — Notion-style side peek that renders a paper's PDF in a panel
- * on the right side of the new-tab page.
+ * viewer.js — paper reader: a window centered over the new-tab page (with a
+ * dimmed backdrop) that renders a paper's PDF. The library underneath keeps
+ * its layout.
  *
  * Uses the bundled PDF.js build (same as thumbs.js), so it works even for
  * sites that forbid iframe embedding — we fetch the PDF ourselves and paint
  * pages onto canvases. Pages render lazily as they scroll into view.
  *
- * Exposes window.PaperViewer = { open(paper), close(), isOpen() } for app.js
- * (a non-module script) to call.
+ * Exposes window.PaperViewer = { open(paper, { focus }), close(), isOpen(),
+ * isOpenFor(id) } for app.js (a non-module script) to call.
  */
 
 import * as pdfjsLib from './vendor/pdf.min.mjs';
@@ -17,7 +18,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = './vendor/pdf.worker.min.mjs';
 
 const PAGE_GAP_SELECTOR_MARGIN = '600px'; // pre-render pages this far from view
 
-let panel, titleEl, bodyEl, openTabBtn;
+let panel, backdrop, titleEl, bodyEl, openTabBtn;
 let currentDoc = null;
 let currentPaperId = null;
 let currentUrl = null;
@@ -26,6 +27,7 @@ let renderGeneration = 0; // invalidates in-flight renders when doc changes
 
 function els() {
   panel = panel || document.getElementById('pdfPanel');
+  backdrop = backdrop || document.getElementById('pdfBackdrop');
   titleEl = titleEl || document.getElementById('pdfPanelTitle');
   bodyEl = bodyEl || document.getElementById('pdfPanelBody');
   openTabBtn = openTabBtn || document.getElementById('pdfPanelOpenTab');
@@ -117,7 +119,23 @@ async function canFrame(url) {
   }
 }
 
-async function open(paper) {
+/**
+ * Give the reader keyboard focus, so arrows and space scroll the paper. The
+ * Lector viewer mounts asynchronously; focus its scroll root once it exists.
+ */
+function focusReader(tries = 20) {
+  const root = document.getElementById('lectorRoot');
+  if (root) {
+    root.focus({ preventScroll: true });
+    return;
+  }
+  bodyEl.focus({ preventScroll: true });
+  if (tries > 0 && bodyEl.classList.contains('is-lector')) {
+    setTimeout(() => focusReader(tries - 1), 50);
+  }
+}
+
+async function open(paper, { focus = false } = {}) {
   if (!els() || !paper) return;
 
   const url = pdfUrlFor(paper);
@@ -127,6 +145,7 @@ async function open(paper) {
   titleEl.textContent = paper.title || paper.url || 'Untitled';
   titleEl.title = titleEl.textContent;
   panel.hidden = false;
+  if (backdrop) backdrop.hidden = false;
   document.body.classList.add('pdf-panel-open');
 
   await teardownDoc();
@@ -158,9 +177,11 @@ async function open(paper) {
         openFrameOrCanvas(url, generation);
       },
     });
+    if (focus) focusReader();
     return;
   }
   openFrameOrCanvas(url, generation);
+  if (focus) focusReader();
 }
 
 async function openFrameOrCanvas(url, generation) {
@@ -237,6 +258,7 @@ async function openFrameOrCanvas(url, generation) {
 async function close() {
   if (!els()) return;
   panel.hidden = true;
+  if (backdrop) backdrop.hidden = true;
   document.body.classList.remove('pdf-panel-open');
   currentPaperId = null;
   currentUrl = null;
@@ -253,18 +275,18 @@ function isOpenFor(paperId) {
   return isOpen() && currentPaperId === paperId;
 }
 
-// ─── Divider drag: resize the panel; pages rescale live (CSS) and
-// re-render crisply at the new width once the drag ends. ───────────────────
+// ─── Edge drag: resize the reader around its center; pages rescale live
+// (CSS) and re-render crisply at the new width once the drag ends. ─────────
 
-const PEEK_WIDTH_KEY = 'paperclip-peek-width';
+const READER_WIDTH_KEY = 'paperclip-reader-width';
 
-function applyPeekWidth(px) {
-  document.documentElement.style.setProperty('--peek-w', `${Math.round(px)}px`);
+function applyReaderWidth(px) {
+  document.documentElement.style.setProperty('--reader-w', `${Math.round(px)}px`);
 }
 
-function clampPeekWidth(px) {
-  const min = 320;
-  const max = Math.max(min, window.innerWidth * 0.8);
+function clampReaderWidth(px) {
+  const min = 480;
+  const max = Math.max(min, window.innerWidth - 48);
   return Math.min(max, Math.max(min, px));
 }
 
@@ -285,31 +307,32 @@ async function rerenderVisiblePages() {
 }
 
 function initResizer() {
-  const resizer = document.getElementById('pdfPanelResizer');
-  if (!resizer) return;
+  const saved = parseInt(localStorage.getItem(READER_WIDTH_KEY) || '', 10);
+  if (saved) applyReaderWidth(clampReaderWidth(saved));
 
-  const saved = parseInt(localStorage.getItem(PEEK_WIDTH_KEY) || '', 10);
-  if (saved) applyPeekWidth(clampPeekWidth(saved));
+  for (const handle of panel.querySelectorAll('.pdf-panel-resizer')) {
+    handle.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      document.body.classList.add('pdf-panel-resizing');
+      let width = panel.getBoundingClientRect().width;
 
-  resizer.addEventListener('mousedown', (e) => {
-    e.preventDefault();
-    document.body.classList.add('pdf-panel-resizing');
-    let width = panel.getBoundingClientRect().width;
-
-    const onMove = (ev) => {
-      width = clampPeekWidth(window.innerWidth - ev.clientX);
-      applyPeekWidth(width);
-    };
-    const onUp = () => {
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-      document.body.classList.remove('pdf-panel-resizing');
-      localStorage.setItem(PEEK_WIDTH_KEY, String(Math.round(width)));
-      rerenderVisiblePages();
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  });
+      // Either edge moves symmetrically: width is twice the distance from
+      // the window's center to the pointer.
+      const onMove = (ev) => {
+        width = clampReaderWidth(2 * Math.abs(ev.clientX - window.innerWidth / 2));
+        applyReaderWidth(width);
+      };
+      const onUp = () => {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        document.body.classList.remove('pdf-panel-resizing');
+        localStorage.setItem(READER_WIDTH_KEY, String(Math.round(width)));
+        rerenderVisiblePages();
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+  }
 }
 
 document.addEventListener('keydown', (e) => {
@@ -319,6 +342,7 @@ document.addEventListener('keydown', (e) => {
 document.addEventListener('DOMContentLoaded', () => {
   if (!els()) return;
   document.getElementById('pdfPanelClose').addEventListener('click', close);
+  if (backdrop) backdrop.addEventListener('click', close);
   openTabBtn.addEventListener('click', () => {
     if (currentUrl) chrome.tabs.create({ url: currentUrl });
   });

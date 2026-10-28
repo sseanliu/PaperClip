@@ -23,6 +23,7 @@
   --bar-fg-quiet: rgba(248, 245, 240, 0.7);
   --bar-hover: rgba(255, 253, 249, 0.18);
   --bar-shadow: rgba(26, 22, 19, 0.28);
+  --scrim: rgba(26, 22, 19, 0.32);
   --noise-opacity: 1;
   color-scheme: light;
 }
@@ -49,6 +50,7 @@
     --bar-fg-quiet: rgba(235, 229, 220, 0.65);
     --bar-hover: rgba(255, 253, 249, 0.1);
     --bar-shadow: rgba(0, 0, 0, 0.6);
+    --scrim: rgba(0, 0, 0, 0.55);
     --noise-opacity: 0.5;
     color-scheme: dark;
   }
@@ -614,7 +616,7 @@ header {
   align-items: center;
 }
 
-/* When the pane is narrow (side peek open / small window), drop the year,
+/* When the pane is narrow (small window), drop the year,
    then the authors column, so the title keeps breathing room. Columns come
    back automatically once there's space again. */
 @container (max-width: 1000px) {
@@ -1089,31 +1091,61 @@ footer {
   justify-content: flex-end;
 }
 
-/* ---- PDF side peek ---- */
+/* ---- PDF reader (a window over the library) ---- */
+:root {
+  --reader-w: 1000px; /* set by the edge drag in viewer.js */
+}
+
+.pdf-backdrop {
+  position: fixed;
+  inset: 0;
+  background: var(--scrim);
+  /* Above the selection bar (200), below the tag picker (300). */
+  z-index: 240;
+  animation: pdf-backdrop-in 0.18s ease-out;
+}
+
+.pdf-backdrop[hidden] {
+  display: none;
+}
+
 .pdf-panel {
   position: fixed;
-  top: 0;
-  right: 0;
-  bottom: 0;
-  width: var(--peek-w);
+  top: 24px;
+  bottom: 24px;
+  left: 50%;
+  width: min(var(--reader-w), calc(100vw - 48px));
+  transform: translateX(-50%);
   display: flex;
   flex-direction: column;
   background: var(--card-bg);
-  border-left: 1px solid var(--warm-gray);
-  /* Above the settings gear (100), below its open dropdown (200). */
-  z-index: 150;
+  border: 1px solid var(--warm-gray);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 24px 80px var(--popover-shadow);
+  z-index: 250;
   animation: pdf-panel-in 0.22s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-/* Draggable divider on the panel's left edge. */
+/* The library stays put underneath; only the reader scrolls. */
+body.pdf-panel-open {
+  overflow: hidden;
+}
+
+/* Drag handles on both side edges; the window resizes around its center. */
 .pdf-panel-resizer {
   position: absolute;
   top: 0;
   bottom: 0;
-  left: -4px;
+  left: 0;
   width: 8px;
   cursor: col-resize;
   z-index: 1;
+}
+
+.pdf-panel-resizer.is-right {
+  left: auto;
+  right: 0;
 }
 
 .pdf-panel-resizer::after {
@@ -1149,21 +1181,13 @@ body.pdf-panel-resizing .pdf-panel {
 }
 
 @keyframes pdf-panel-in {
-  from { transform: translateX(24px); opacity: 0; }
-  to   { transform: translateX(0);    opacity: 1; }
+  from { transform: translateX(-50%) translateY(12px) scale(0.985); opacity: 0; }
+  to   { transform: translateX(-50%); opacity: 1; }
 }
 
-/* With the peek open, the shell is confined to the uncovered region and the
-   sidebar + list center themselves inside it. --peek-w is set by the divider
-   drag in viewer.js. */
-:root {
-  --peek-w: min(48vw, 760px);
-}
-
-body.pdf-panel-open .app-shell {
-  max-width: calc(100vw - var(--peek-w));
-  margin: 0;
-  justify-content: center;
+@keyframes pdf-backdrop-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
 .pdf-panel-header {
@@ -1314,7 +1338,7 @@ body.pdf-panel-resizing .pdf-frame {
 
 /* ---- Gallery view ---- */
 /* At most five covers per row; a wider pane makes each cover bigger instead
-   of adding columns. Narrower panes (laptop window, side peek open) drop
+   of adding columns. Narrower panes (laptop or small window) drop
    columns so covers stay roughly 200-270px wide. */
 .paper-list.is-gallery {
   display: grid;

@@ -252,7 +252,7 @@ function setViewMode(mode) {
 
 // Keyboard cursor over the rendered results (command-palette style): ArrowDown
 // from the search field enters the results, arrows move (grid-aware in
-// gallery), each move previews in the side peek, ArrowUp from the top row
+// gallery), each move previews in the reader, ArrowUp from the top row
 // returns to the input. The input keeps DOM focus throughout so typing
 // continues to refine the query.
 let renderedIds = [];
@@ -509,7 +509,7 @@ function renderRow(p, openMap, thumb) {
 
 // Gallery card: cover thumbnail with the title underneath. Reuses the
 // .paper-row class so the delegated click handlers work unchanged (title
-// click opens the paper, cover click opens the side peek).
+// click opens the paper, cover click opens the reader).
 // Stand-in cover for papers without a first-page image (paywalled or
 // bot-blocked PDFs): source, title and venue set like a title page.
 function renderTextCover(p, title) {
@@ -1098,15 +1098,15 @@ document.addEventListener('click', async (e) => {
     return;
   }
 
-  // Click anywhere else on the row: open the PDF side peek (or close it if
-  // it's already showing this paper).
+  // Click anywhere else on the row: open the paper in the reader, with
+  // keyboard focus in it so arrows and space scroll the paper.
   if (window.PaperViewer) {
     cursorId = id;
     applyCursor();
     if (window.PaperViewer.isOpenFor(id)) return;
     const papers = await getPapers();
     const paper = papers[id];
-    if (paper) window.PaperViewer.open(paper);
+    if (paper) window.PaperViewer.open(paper, { focus: true });
   }
 });
 
