@@ -1092,10 +1092,6 @@ footer {
 }
 
 /* ---- PDF reader (a window over the library) ---- */
-:root {
-  --reader-w: 1000px; /* set by the edge drag in viewer.js */
-}
-
 .pdf-backdrop {
   position: fixed;
   inset: 0;
@@ -1109,15 +1105,10 @@ footer {
   display: none;
 }
 
+/* Fills the screen up to a 24px margin; zoom scales the paper inside it. */
 .pdf-panel {
   position: fixed;
-  top: 24px;
-  bottom: 24px;
-  left: 50%;
-  width: min(var(--reader-w), calc(100vw - 48px));
-  /* viewer.js widens the window inline as you zoom in; never past the screen. */
-  max-width: calc(100vw - 48px);
-  transform: translateX(-50%);
+  inset: 24px;
   display: flex;
   flex-direction: column;
   background: var(--card-bg);
@@ -1127,55 +1118,11 @@ footer {
   box-shadow: 0 24px 80px var(--popover-shadow);
   z-index: 250;
   animation: pdf-panel-in 0.22s cubic-bezier(0.22, 1, 0.36, 1);
-  transition: width 0.16s ease-out;
 }
 
 /* The library stays put underneath; only the reader scrolls. */
 body.pdf-panel-open {
   overflow: hidden;
-}
-
-/* Drag handles on both side edges; the window resizes around its center. */
-.pdf-panel-resizer {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 0;
-  width: 8px;
-  cursor: col-resize;
-  z-index: 1;
-}
-
-.pdf-panel-resizer.is-right {
-  left: auto;
-  right: 0;
-}
-
-.pdf-panel-resizer::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 3px;
-  width: 2px;
-  background: transparent;
-  transition: background 0.15s;
-}
-
-.pdf-panel-resizer:hover::after,
-body.pdf-panel-resizing .pdf-panel-resizer::after {
-  background: var(--accent-sage);
-}
-
-/* While dragging, kill text selection and let the resizer own the cursor. */
-body.pdf-panel-resizing {
-  cursor: col-resize;
-  user-select: none;
-}
-
-body.pdf-panel-resizing .pdf-panel {
-  animation: none;
-  transition: none;
 }
 
 /* The explicit display:flex above would otherwise override the hidden
@@ -1185,8 +1132,8 @@ body.pdf-panel-resizing .pdf-panel {
 }
 
 @keyframes pdf-panel-in {
-  from { transform: translateX(-50%) translateY(12px) scale(0.985); opacity: 0; }
-  to   { transform: translateX(-50%); opacity: 1; }
+  from { transform: translateY(12px) scale(0.985); opacity: 0; }
+  to   { transform: none; opacity: 1; }
 }
 
 @keyframes pdf-backdrop-in {
@@ -1254,14 +1201,10 @@ body.pdf-panel-resizing .pdf-panel {
   border: none;
 }
 
-/* While dragging the divider, don't let the iframe swallow mouse events. */
-body.pdf-panel-resizing .pdf-frame {
-  pointer-events: none;
-}
-
 .pdf-page {
   margin: 0 auto 14px;
-  max-width: 100%;
+  /* Same reading width as the Lector viewer's starting zoom. */
+  max-width: min(100%, 1000px);
   background: #ffffff;
   box-shadow: 0 1px 4px var(--page-shadow);
   border-radius: 2px;

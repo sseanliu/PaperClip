@@ -77,7 +77,7 @@ async function renderPageInto(holder, pageNum, generation) {
   const page = await currentDoc.getPage(pageNum);
   if (generation !== renderGeneration) return;
 
-  const containerWidth = holder.clientWidth || bodyEl.clientWidth - 32;
+  const containerWidth = holder.clientWidth || Math.min(READING_WIDTH, bodyEl.clientWidth - 32);
   const base = page.getViewport({ scale: 1 });
   const cssScale = containerWidth / base.width;
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -135,28 +135,9 @@ function focusReader(tries = 20) {
   }
 }
 
-/**
- * Zooming in grows the reader window with the page until it reaches the
- * screen edges; only past that does the page crop inside the window (and
- * scroll sideways). Fit-to-width, or zooming back out, returns the window to
- * its set width (--reader-w).
- */
-function fitWindowToZoom({ fit, pageWidth }) {
-  if (!panel || panel.hidden) return;
-  if (fit) {
-    panel.style.width = '';
-    return;
-  }
-  const pages = bodyEl.querySelector('.lector-pages');
-  if (!pages) return;
-  // Everything in the window besides the page column: borders, scrollbar,
-  // the thumbnail strip or search pane when open.
-  const chrome = panel.getBoundingClientRect().width - pages.clientWidth;
-  const base = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--reader-w')) || 1000;
-  const max = window.innerWidth - 48;
-  const want = Math.ceil(pageWidth + chrome);
-  panel.style.width = want > Math.min(base, max) ? `${Math.min(max, want)}px` : '';
-}
+// The window fills the screen; a paper opens at a comfortable reading width
+// inside it, and zoom scales the paper within the window.
+const READING_WIDTH = 1000;
 
 async function open(paper, { focus = false } = {}) {
   if (!els() || !paper) return;
@@ -194,7 +175,7 @@ async function open(paper, { focus = false } = {}) {
     bodyEl.appendChild(holder);
     lectorHolder = holder;
     window.LectorPanel.mount(holder, url, {
-      onZoom: fitWindowToZoom,
+      pageWidth: READING_WIDTH,
       onError: () => {
         if (generation !== renderGeneration) return;
         teardownLector();
@@ -282,7 +263,6 @@ async function openFrameOrCanvas(url, generation) {
 async function close() {
   if (!els()) return;
   panel.hidden = true;
-  panel.style.width = '';
   if (backdrop) backdrop.hidden = true;
   document.body.classList.remove('pdf-panel-open');
   currentPaperId = null;
@@ -300,67 +280,6 @@ function isOpenFor(paperId) {
   return isOpen() && currentPaperId === paperId;
 }
 
-// ─── Edge drag: resize the reader around its center; pages rescale live
-// (CSS) and re-render crisply at the new width once the drag ends. ─────────
-
-const READER_WIDTH_KEY = 'paperclip-reader-width';
-
-function applyReaderWidth(px) {
-  document.documentElement.style.setProperty('--reader-w', `${Math.round(px)}px`);
-}
-
-function clampReaderWidth(px) {
-  const min = 480;
-  const max = Math.max(min, window.innerWidth - 48);
-  return Math.min(max, Math.max(min, px));
-}
-
-async function rerenderVisiblePages() {
-  if (!currentDoc || !bodyEl) return;
-  const generation = renderGeneration;
-  const holders = [...bodyEl.querySelectorAll('.pdf-page')];
-  for (const holder of holders) {
-    if (generation !== renderGeneration) return;
-    if (!holder.querySelector('canvas')) continue; // placeholder — observer handles it
-    const n = parseInt(holder.dataset.page, 10);
-    try {
-      await renderPageInto(holder, n, generation);
-    } catch (err) {
-      console.warn('[paperclip] page rerender failed', n, err && err.message);
-    }
-  }
-}
-
-function initResizer() {
-  const saved = parseInt(localStorage.getItem(READER_WIDTH_KEY) || '', 10);
-  if (saved) applyReaderWidth(clampReaderWidth(saved));
-
-  for (const handle of panel.querySelectorAll('.pdf-panel-resizer')) {
-    handle.addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      document.body.classList.add('pdf-panel-resizing');
-      panel.style.width = ''; // the drag sets the base width; drop any zoom growth
-      let width = panel.getBoundingClientRect().width;
-
-      // Either edge moves symmetrically: width is twice the distance from
-      // the window's center to the pointer.
-      const onMove = (ev) => {
-        width = clampReaderWidth(2 * Math.abs(ev.clientX - window.innerWidth / 2));
-        applyReaderWidth(width);
-      };
-      const onUp = () => {
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onUp);
-        document.body.classList.remove('pdf-panel-resizing');
-        localStorage.setItem(READER_WIDTH_KEY, String(Math.round(width)));
-        rerenderVisiblePages();
-      };
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
-    });
-  }
-}
-
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && isOpen()) close();
 });
@@ -372,7 +291,6 @@ document.addEventListener('DOMContentLoaded', () => {
   openTabBtn.addEventListener('click', () => {
     if (currentUrl) chrome.tabs.create({ url: currentUrl });
   });
-  initResizer();
 });
 
 window.PaperViewer = { open, close, isOpen, isOpenFor };

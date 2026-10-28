@@ -24,7 +24,7 @@ import {
   useSelectionDimensions,
 } from "@anaralabs/lector";
 import { GlobalWorkerOptions } from "pdfjs-dist/legacy/build/pdf.mjs";
-import { useEffect, useState, useSyncExternalStore } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 
 GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("vendor/lector-pdf.worker.min.mjs");
@@ -212,27 +212,33 @@ function SelectionRects({ pageNumber }) {
   );
 }
 
-// Reports the zoom so the reader window (viewer.js) can grow with the page.
-// Viewports are at scale 1, so a page renders viewport.width * zoom wide.
-function ZoomReporter({ onZoom }) {
-  const zoom = usePdf((s) => s.zoom);
-  const fit = usePdf((s) => s.isZoomFitWidth);
+// Opens the paper at a reading width (pageWidth CSS px) rather than filling
+// the full-screen window; on a window narrower than that it fits the width.
+// Runs once per document, when page sizes are known.
+function InitialZoom({ pageWidth }) {
   const viewports = usePdf((s) => s.viewports);
+  const updateZoom = usePdf((s) => s.updateZoom);
+  const done = useRef(false);
   useEffect(() => {
-    if (!onZoom || !viewports || !viewports.length) return;
+    if (done.current || !viewports || !viewports.length) return;
+    done.current = true;
     const widest = Math.max(...viewports.map((v) => v.width));
-    onZoom({ fit, pageWidth: widest * zoom });
-  }, [zoom, fit, viewports, onZoom]);
+    // The page column may not be laid out yet; the root is, and spans it.
+    // (zoomFitWidth is a no-op this early, so fit by hand.)
+    const root = document.getElementById("lectorRoot");
+    const room = root ? root.clientWidth : pageWidth;
+    updateZoom(Math.min(pageWidth, room) / widest, false);
+  }, [viewports, updateZoom, pageWidth]);
   return null;
 }
 
-function Viewer({ url, onError, onZoom }) {
+function Viewer({ url, onError, pageWidth = 1000 }) {
   const [showThumbs, setShowThumbs] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   return (
     <Root
       source={url}
-      isZoomFitWidth
+      zoom={pageWidth / 612}
       id="lectorRoot"
       tabIndex={-1}
       className="lector-root"
@@ -243,7 +249,7 @@ function Viewer({ url, onError, onZoom }) {
       loader={<div className="lector-loading">Loading PDF…</div>}
     >
       <SelectionWatcher />
-      <ZoomReporter onZoom={onZoom} />
+      <InitialZoom pageWidth={pageWidth} />
       <Search>
         <div className="lector-shell">
           <div className="lector-toolbar">
@@ -326,11 +332,11 @@ function Viewer({ url, onError, onZoom }) {
 const roots = new WeakMap();
 
 window.LectorPanel = {
-  mount(container, url, { onError, onZoom } = {}) {
+  mount(container, url, { onError, pageWidth } = {}) {
     this.unmount(container);
     const root = createRoot(container);
     roots.set(container, root);
-    root.render(<Viewer url={url} onError={onError} onZoom={onZoom} />);
+    root.render(<Viewer url={url} onError={onError} pageWidth={pageWidth} />);
   },
   unmount(container) {
     const root = roots.get(container);
