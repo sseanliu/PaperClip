@@ -304,8 +304,9 @@ function Viewer({ url, onError, pageWidth = 1000, title, onClose, onOpenTab }) {
         <div className="lector-shell" onMouseMove={toolbar.onMouseMove}>
           <div
             className={`lector-toolbar${toolbar.shown ? "" : " is-hidden"}`}
-            // As wide as the paper at its opening zoom, centered over it.
-            style={{ maxWidth: pageWidth }}
+            // A little narrower than the paper at its opening zoom (32px in
+            // from each edge), centered over it.
+            style={{ maxWidth: pageWidth - 64 }}
             {...toolbar.toolbarHandlers}
           >
             <button
