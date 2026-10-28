@@ -87,9 +87,9 @@ body::before {
 .app-shell {
   position: relative;
   z-index: 1;
-  max-width: 1500px;
+  max-width: 2200px;
   margin: 0 auto;
-  padding: 48px 48px 80px;
+  padding: 48px 32px 80px;
   display: flex;
   gap: 36px;
   align-items: flex-start;
@@ -379,7 +379,6 @@ body::before {
 .main-pane {
   flex: 1;
   min-width: 0;
-  max-width: 1180px;
 }
 
 /* ---- Header ---- */
@@ -1312,7 +1311,7 @@ body.pdf-panel-resizing .pdf-frame {
 /* ---- Gallery view ---- */
 .paper-list.is-gallery {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
   gap: 26px 20px;
   padding: 18px 2px;
 }
