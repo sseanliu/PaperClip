@@ -1566,12 +1566,14 @@ body.pdf-panel-open {
   height: 100%;
 }
 
-/* Floats over the top of the paper; hidden while reading. */
+/* Floats over the top of the paper; hidden while reading. Its max-width
+   (set inline) matches the paper's opening width; auto margins center it. */
 .lector-toolbar {
   position: absolute;
   top: 12px;
   left: 12px;
   right: 12px;
+  margin: 0 auto;
   z-index: 3;
   display: flex;
   align-items: center;

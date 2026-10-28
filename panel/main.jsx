@@ -302,7 +302,12 @@ function Viewer({ url, onError, pageWidth = 1000, title, onClose, onOpenTab }) {
       <InitialZoom pageWidth={pageWidth} />
       <Search>
         <div className="lector-shell" onMouseMove={toolbar.onMouseMove}>
-          <div className={`lector-toolbar${toolbar.shown ? "" : " is-hidden"}`} {...toolbar.toolbarHandlers}>
+          <div
+            className={`lector-toolbar${toolbar.shown ? "" : " is-hidden"}`}
+            // As wide as the paper at its opening zoom, centered over it.
+            style={{ maxWidth: pageWidth }}
+            {...toolbar.toolbarHandlers}
+          >
             <button
               type="button"
               className={`lector-btn${showThumbs ? " is-on" : ""}`}
