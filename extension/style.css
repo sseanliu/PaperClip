@@ -87,9 +87,12 @@ body::before {
 .app-shell {
   position: relative;
   z-index: 1;
-  max-width: 1800px;
+  /* 1440px pane + 220px sidebar + 36px gap + 2 x 120px margins */
+  max-width: 1936px;
   margin: 0 auto;
-  padding: 48px 48px 80px;
+  /* Side margins scale with the window so smaller screens keep whitespace
+     around the library instead of running edge to edge. */
+  padding: 48px clamp(48px, 6vw, 120px) 80px;
   display: flex;
   gap: 36px;
   align-items: flex-start;
@@ -1310,9 +1313,9 @@ body.pdf-panel-resizing .pdf-frame {
 }
 
 /* ---- Gallery view ---- */
-/* Five covers per row; a wider pane makes each cover bigger instead of
-   adding columns. Narrow panes (small window, side peek open) step down so
-   covers stay at least ~190px wide. */
+/* At most five covers per row; a wider pane makes each cover bigger instead
+   of adding columns. Narrower panes (laptop window, side peek open) drop a
+   column early so covers stay around 240px or wider. */
 .paper-list.is-gallery {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -1320,15 +1323,15 @@ body.pdf-panel-resizing .pdf-frame {
   padding: 18px 2px;
 }
 
-@container (max-width: 1030px) {
+@container (max-width: 1300px) {
   .paper-list.is-gallery { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 }
 
-@container (max-width: 820px) {
+@container (max-width: 1000px) {
   .paper-list.is-gallery { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 
-@container (max-width: 610px) {
+@container (max-width: 640px) {
   .paper-list.is-gallery { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
