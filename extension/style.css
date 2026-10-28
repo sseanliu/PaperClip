@@ -1103,12 +1103,13 @@ footer {
   display: none;
 }
 
-/* Fills the screen up to a 24px margin; zoom scales the paper inside it.
-   The window itself is transparent: pages float over the dimmed library,
-   and only the title bar + toolbar (and side panes) are solid. */
+/* Full screen height; zoom scales the paper inside it. The window itself is
+   transparent: pages float over the dimmed library under an auto-hiding
+   toolbar (panel/main.jsx). Fallback modes without the Lector viewer
+   (iframe, messages) keep a framed layout with the title bar below. */
 .pdf-panel {
   position: fixed;
-  inset: 24px;
+  inset: 0 24px;
   display: flex;
   flex-direction: column;
   background: transparent;
@@ -1137,22 +1138,22 @@ body.pdf-panel-open {
   to   { opacity: 1; }
 }
 
+.pdf-panel:not(:has(.pdf-panel-body.is-lector)) {
+  inset: 24px;
+}
+
 .pdf-panel-header {
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 10px 12px 10px 16px;
   background: var(--card-bg);
-  border-bottom: 1px solid var(--warm-gray);
-  border-radius: 12px 12px 0 0;
+  border-radius: 12px;
   flex: none;
 }
 
-/* Without the Lector toolbar below it (iframe, fallback, message), the title
-   bar is the whole solid block. */
-.pdf-panel:not(:has(.lector-toolbar)) .pdf-panel-header {
-  border-bottom: none;
-  border-radius: 12px;
+.pdf-panel:has(.pdf-panel-body.is-lector) .pdf-panel-header {
+  display: none;
 }
 
 .pdf-panel-title {
@@ -1559,22 +1560,49 @@ body.pdf-panel-open {
 
 /* ---- Lector full viewer chrome ---- */
 .lector-shell {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
 }
 
+/* Floats over the top of the paper; hidden while reading. */
 .lector-toolbar {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  z-index: 3;
   display: flex;
   align-items: center;
   gap: 4px;
   padding: 6px 10px;
   background: var(--card-bg);
-  border-radius: 0 0 12px 12px;
+  border-radius: 12px;
+  box-shadow: 0 8px 30px var(--popover-shadow);
+  transition: opacity 0.18s ease, transform 0.18s ease;
   font-family: 'DM Sans', sans-serif;
   font-size: 12px;
   color: var(--muted);
   flex: none;
+}
+
+.lector-toolbar.is-hidden {
+  opacity: 0;
+  transform: translateY(-8px);
+  pointer-events: none;
+}
+
+.lector-title {
+  min-width: 0;
+  max-width: 40%;
+  margin-left: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .lector-toolbar-spacer {
@@ -1634,7 +1662,6 @@ body.pdf-panel-open {
   display: flex;
   flex: 1;
   min-height: 0;
-  margin-top: 12px;
   gap: 12px;
 }
 
@@ -1642,6 +1669,8 @@ body.pdf-panel-open {
   width: 132px;
   flex: none;
   overflow-y: auto;
+  /* Clear the floating toolbar. */
+  margin: 64px 0 12px;
   padding: 10px;
   border-radius: 12px;
   background: var(--card-bg);
@@ -1663,6 +1692,7 @@ body.pdf-panel-open {
   width: 240px;
   flex: none;
   overflow-y: auto;
+  margin: 64px 0 12px;
   padding: 10px;
   border-radius: 12px;
   background: var(--card-bg);

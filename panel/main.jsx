@@ -24,7 +24,7 @@ import {
   useSelectionDimensions,
 } from "@anaralabs/lector";
 import { GlobalWorkerOptions } from "pdfjs-dist/legacy/build/pdf.mjs";
-import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 
 GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("vendor/lector-pdf.worker.min.mjs");
@@ -232,9 +232,59 @@ function InitialZoom({ pageWidth }) {
   return null;
 }
 
-function Viewer({ url, onError, pageWidth = 1000 }) {
+// The toolbar floats over the top of the paper and hides while you read. It
+// comes back when the pointer nears the top edge, stays while hovered or
+// while one of its inputs has focus, and shows briefly when a paper opens so
+// it's discoverable.
+const TOOLBAR_REVEAL_PX = 96;
+const TOOLBAR_HIDE_MS = 1200;
+const TOOLBAR_FIRST_SHOW_MS = 2500;
+
+function useAutoHideToolbar() {
+  const [shown, setShown] = useState(true);
+  const hovering = useRef(false);
+  const timer = useRef(0);
+  const scheduleHide = useCallback((ms = TOOLBAR_HIDE_MS) => {
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => {
+      const active = document.activeElement;
+      if (hovering.current || (active && active.closest && active.closest(".lector-toolbar"))) return;
+      setShown(false);
+    }, ms);
+  }, []);
+  useEffect(() => {
+    scheduleHide(TOOLBAR_FIRST_SHOW_MS);
+    return () => clearTimeout(timer.current);
+  }, [scheduleHide]);
+  const onMouseMove = useCallback(
+    (e) => {
+      if (e.clientY - e.currentTarget.getBoundingClientRect().top < TOOLBAR_REVEAL_PX) {
+        clearTimeout(timer.current);
+        setShown(true);
+      } else {
+        scheduleHide();
+      }
+    },
+    [scheduleHide],
+  );
+  const toolbarHandlers = {
+    onMouseEnter: () => {
+      hovering.current = true;
+      clearTimeout(timer.current);
+      setShown(true);
+    },
+    onMouseLeave: () => {
+      hovering.current = false;
+      scheduleHide();
+    },
+  };
+  return { shown, onMouseMove, toolbarHandlers };
+}
+
+function Viewer({ url, onError, pageWidth = 1000, title, onClose, onOpenTab }) {
   const [showThumbs, setShowThumbs] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
+  const toolbar = useAutoHideToolbar();
   return (
     <Root
       source={url}
@@ -251,8 +301,8 @@ function Viewer({ url, onError, pageWidth = 1000 }) {
       <SelectionWatcher />
       <InitialZoom pageWidth={pageWidth} />
       <Search>
-        <div className="lector-shell">
-          <div className="lector-toolbar">
+        <div className="lector-shell" onMouseMove={toolbar.onMouseMove}>
+          <div className={`lector-toolbar${toolbar.shown ? "" : " is-hidden"}`} {...toolbar.toolbarHandlers}>
             <button
               type="button"
               className={`lector-btn${showThumbs ? " is-on" : ""}`}
@@ -266,6 +316,11 @@ function Viewer({ url, onError, pageWidth = 1000 }) {
                 <rect x="14" y="14" width="7" height="7" rx="1" />
               </I>
             </button>
+            {title && (
+              <span className="lector-title" title={title}>
+                {title}
+              </span>
+            )}
             <span className="lector-toolbar-spacer" />
             <PreviousPage className="lector-btn" title="Previous page">
               <I>
@@ -305,6 +360,23 @@ function Viewer({ url, onError, pageWidth = 1000 }) {
                 <path d="m21 21-4.3-4.3" />
               </I>
             </button>
+            {onOpenTab && (
+              <button type="button" className="lector-btn" title="Open in a tab" onClick={onOpenTab}>
+                <I>
+                  <path d="M15 3h6v6" />
+                  <path d="M10 14 21 3" />
+                  <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+                </I>
+              </button>
+            )}
+            {onClose && (
+              <button type="button" className="lector-btn" title="Close" onClick={onClose}>
+                <I>
+                  <path d="M18 6 6 18" />
+                  <path d="m6 6 12 12" />
+                </I>
+              </button>
+            )}
           </div>
           <div className="lector-main">
             {showThumbs && (
@@ -332,11 +404,20 @@ function Viewer({ url, onError, pageWidth = 1000 }) {
 const roots = new WeakMap();
 
 window.LectorPanel = {
-  mount(container, url, { onError, pageWidth } = {}) {
+  mount(container, url, { onError, pageWidth, title, onClose, onOpenTab } = {}) {
     this.unmount(container);
     const root = createRoot(container);
     roots.set(container, root);
-    root.render(<Viewer url={url} onError={onError} pageWidth={pageWidth} />);
+    root.render(
+      <Viewer
+        url={url}
+        onError={onError}
+        pageWidth={pageWidth}
+        title={title}
+        onClose={onClose}
+        onOpenTab={onOpenTab}
+      />,
+    );
   },
   unmount(container) {
     const root = roots.get(container);

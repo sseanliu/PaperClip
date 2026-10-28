@@ -176,6 +176,11 @@ async function open(paper, { focus = false } = {}) {
     lectorHolder = holder;
     window.LectorPanel.mount(holder, url, {
       pageWidth: READING_WIDTH,
+      // The Lector toolbar carries the title and window buttons; the panel
+      // header is hidden in this mode.
+      title: titleEl.textContent,
+      onClose: close,
+      onOpenTab: () => { if (currentUrl) chrome.tabs.create({ url: currentUrl }); },
       onError: () => {
         if (generation !== renderGeneration) return;
         teardownLector();
