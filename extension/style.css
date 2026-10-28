@@ -1103,13 +1103,14 @@ footer {
   display: none;
 }
 
-/* Full screen height; zoom scales the paper inside it. The window itself is
-   transparent: pages float over the dimmed library under an auto-hiding
-   toolbar (panel/main.jsx). Fallback modes without the Lector viewer
-   (iframe, messages) keep a framed layout with the title bar below. */
+/* Full screen; zoom scales the paper inside it, so at high zoom the page
+   runs edge to edge. The window itself is transparent: pages float over the
+   dimmed library under an auto-hiding toolbar (panel/main.jsx). Fallback
+   modes without the Lector viewer (iframe, messages) keep a framed layout
+   with the title bar below. */
 .pdf-panel {
   position: fixed;
-  inset: 0 24px;
+  inset: 0;
   display: flex;
   flex-direction: column;
   background: transparent;
@@ -1672,8 +1673,8 @@ body.pdf-panel-open {
   width: 132px;
   flex: none;
   overflow-y: auto;
-  /* Clear the floating toolbar. */
-  margin: 64px 0 12px;
+  /* Clear the floating toolbar and the screen edge. */
+  margin: 64px 0 12px 12px;
   padding: 10px;
   border-radius: 12px;
   background: var(--card-bg);
@@ -1695,7 +1696,7 @@ body.pdf-panel-open {
   width: 240px;
   flex: none;
   overflow-y: auto;
-  margin: 64px 0 12px;
+  margin: 64px 12px 12px 0;
   padding: 10px;
   border-radius: 12px;
   background: var(--card-bg);
