@@ -303,6 +303,11 @@ async function renderFirstPage(pdfUrl) {
     url: pdfUrl,
     disableAutoFetch: true,
     rangeChunkSize: 262144,
+    // Draw glyphs as paths instead of registering @font-face fonts. This
+    // pdf.js copy and the reader's (Lector) each number documents from d0,
+    // so both register fonts named like "g_d0_f1"; the page then drew the
+    // open paper with another paper's glyphs (garbled text).
+    disableFontFace: true,
   });
   let timer;
   const timeout = new Promise((_, reject) => {

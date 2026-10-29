@@ -223,6 +223,9 @@ async function openFrameOrCanvas(url, generation) {
       url,
       disableAutoFetch: true,
       rangeChunkSize: 262144,
+      // Same pdf.js copy as the thumbnails: no @font-face registration, so
+      // its font names can't collide with the Lector reader's (see thumbs.js).
+      disableFontFace: true,
     });
     doc = await task.promise;
   } catch (err) {
