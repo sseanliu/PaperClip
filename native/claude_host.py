@@ -29,7 +29,7 @@ Extension -> host
                                            session; fresh starts a new one
   {"type": "sessions"}                     list this paper's sessions
   {"type": "pdf", "data": base64}          reply to need_pdf
-  {"type": "ask", "text"}
+  {"type": "ask", "text", "images"?: [{"mediaType", "data": base64}]}
   {"type": "permission", "requestId", "allow": bool}
   {"type": "interrupt"}
 Host -> extension
@@ -136,12 +136,27 @@ def scan_transcript(path):
         ts = o.get("timestamp") or ""
         content = (o.get("message") or {}).get("content")
         if o.get("type") == "user":
-            # A typed question is a string; tool results come back as lists.
-            if not isinstance(content, str) or not content.strip() or content.startswith("<"):
+            # A typed question is a string, or a list when images were pasted
+            # with it; tool results also come back as lists.
+            if isinstance(content, str):
+                blocks = [{"type": "text", "text": content}]
+            elif isinstance(content, list) and not any(isinstance(b, dict) and b.get("type") == "tool_result" for b in content):
+                blocks = [b for b in content if isinstance(b, dict)]
+            else:
+                continue
+            parts = []
+            for b in blocks:
+                if b.get("type") == "text" and b.get("text", "").strip() and not b["text"].startswith("<"):
+                    parts.append({"type": "text", "text": b["text"]})
+                elif b.get("type") == "image":
+                    # Pixels stay out: a few screenshots would pass the 1 MB message cap.
+                    parts.append({"type": "image"})
+            if not parts:
                 continue
             prompts += 1
-            title = title or " ".join(content.split())[:120]
-            messages.append({"role": "user", "parts": [{"type": "text", "text": content}]})
+            text = " ".join(p["text"] for p in parts if p["type"] == "text")
+            title = title or (" ".join(text.split())[:120] if text else "(image)")
+            messages.append({"role": "user", "parts": parts})
         else:
             if not isinstance(content, list):
                 continue
@@ -344,8 +359,18 @@ class Session:
 
     def ask(self, msg):
         text = (msg.get("text") or "").strip()
-        if text:
-            self.write({"type": "user", "message": {"role": "user", "content": text}})
+        images = [i for i in (msg.get("images") or []) if isinstance(i, dict) and i.get("data")]
+        if not text and not images:
+            return
+        if images:
+            content = [
+                {"type": "image", "source": {"type": "base64", "media_type": i.get("mediaType") or "image/png", "data": i["data"]}}
+                for i in images
+            ]
+            content.append({"type": "text", "text": text or "(see the image)"})
+        else:
+            content = text
+        self.write({"type": "user", "message": {"role": "user", "content": content}})
 
     def answer_permission(self, msg):
         request_id = msg.get("requestId")

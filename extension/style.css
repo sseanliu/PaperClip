@@ -2224,6 +2224,75 @@ body.chat-dragging .chat-header {
   display: none;
 }
 
+/* Images pasted or dropped, waiting to be sent with the next message. */
+.chat-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px 0;
+  border-top: 1px solid var(--warm-gray);
+}
+
+.chat-attachments[hidden] {
+  display: none;
+}
+
+.chat-attachments + .chat-compose {
+  border-top: none;
+}
+
+.chat-attachment {
+  position: relative;
+}
+
+.chat-attachment img {
+  display: block;
+  width: 64px;
+  height: 64px;
+  object-fit: cover;
+  border: 1px solid var(--warm-gray);
+  border-radius: 8px;
+}
+
+.chat-attachment-remove {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: 1px solid var(--warm-gray);
+  border-radius: 50%;
+  background: var(--card-bg);
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.chat-msg-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.chat-msg-image {
+  display: block;
+  max-width: 240px;
+  max-height: 180px;
+  border-radius: 8px;
+}
+
+.chat-msg-image-chip {
+  padding: 2px 8px;
+  border: 1px solid var(--muted);
+  border-radius: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
 .chat-compose {
   display: flex;
   align-items: flex-end;

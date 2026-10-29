@@ -27,7 +27,9 @@
   let paper = null; // { id, title, pdfUrl } the session is about
   let ready = false;
   let busy = false;
-  let pendingAsk = null; // text typed before the session was ready
+  let pendingAsk = null; // { text, images } sent before the session was ready
+  let attachments = []; // pasted/dropped images: { mediaType, data (base64), src (data URL) }
+  let attachEl = null;
   let messages = []; // { role: 'user' | 'assistant', parts: [...] }
   let sessionId = null; // the session on screen, once the host knows it
   let historyEl = null;
@@ -129,6 +131,7 @@
       <div class="chat-list" id="chatList"></div>
       <div class="chat-history" id="chatHistory" hidden></div>
       <div class="chat-notice" id="chatNotice" hidden></div>
+      <div class="chat-attachments" id="chatAttachments" hidden></div>
       <div class="chat-compose">
         <textarea class="chat-input" id="chatInput" rows="1" placeholder="Ask about this paper…"></textarea>
         <button class="chat-send" data-chat-action="send" title="Send (Enter)">Send</button>
@@ -141,6 +144,7 @@
     titleEl = win.querySelector('#chatPaper');
     noticeEl = win.querySelector('#chatNotice');
     historyEl = win.querySelector('#chatHistory');
+    attachEl = win.querySelector('#chatAttachments');
 
     win.addEventListener('click', (e) => {
       const btn = e.target.closest('[data-chat-action]');
@@ -153,6 +157,30 @@
       else if (action === 'send') (busy ? interrupt() : submit());
       else if (action === 'suggest' && !busy) submit(SUGGESTION);
       else if (action === 'allow' || action === 'deny') answerPermission(btn.dataset.requestId, action === 'allow');
+      else if (action === 'remove-image') {
+        attachments.splice(Number(btn.dataset.index), 1);
+        renderAttachments();
+        inputEl.focus();
+      }
+    });
+
+    // Paste a screenshot into the input, or drop image files on the window.
+    inputEl.addEventListener('paste', (e) => {
+      const files = [...(e.clipboardData ? e.clipboardData.files : [])].filter((f) => f.type.startsWith('image/'));
+      if (!files.length) return;
+      // Keep any text that came along; a bare image shouldn't paste a file name.
+      if (!e.clipboardData.types.includes('text/plain')) e.preventDefault();
+      files.forEach(addImage);
+    });
+    win.addEventListener('dragover', (e) => {
+      if (e.dataTransfer && [...e.dataTransfer.items].some((i) => i.kind === 'file' && i.type.startsWith('image/'))) e.preventDefault();
+    });
+    win.addEventListener('drop', (e) => {
+      const files = [...(e.dataTransfer ? e.dataTransfer.files : [])].filter((f) => f.type.startsWith('image/'));
+      if (!files.length) return;
+      e.preventDefault();
+      files.forEach(addImage);
+      inputEl.focus();
     });
     inputEl.addEventListener('keydown', (e) => {
       // Enter sends; Shift+Enter is a new line; Enter while composing (IME) is not a send.
@@ -342,24 +370,82 @@
     }
   }
 
-  /** Sends `prompt` (a suggestion), or else what's typed in the input. */
+  // ---- Images ----------------------------------------------------------------------
+
+  // Claude takes images up to 5 MB and works at ~1.5k px anyway; bigger
+  // screenshots are scaled down before they're attached.
+  const MAX_IMAGE_SIDE = 2000;
+  const MAX_IMAGE_BYTES = 3.5 * 1024 * 1024;
+
+  function blobToDataUrl(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async function prepareImage(file) {
+    let blob = file;
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, MAX_IMAGE_SIDE / Math.max(bitmap.width, bitmap.height));
+    if (scale < 1 || file.size > MAX_IMAGE_BYTES || !/^image\/(png|jpeg|gif|webp)$/.test(file.type)) {
+      const canvas = new OffscreenCanvas(Math.round(bitmap.width * scale), Math.round(bitmap.height * scale));
+      canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      blob = await canvas.convertToBlob({ type: 'image/png' });
+      if (blob.size > MAX_IMAGE_BYTES) blob = await canvas.convertToBlob({ type: 'image/jpeg', quality: 0.9 });
+    }
+    bitmap.close();
+    const src = await blobToDataUrl(blob);
+    return { mediaType: blob.type, data: src.slice(src.indexOf(',') + 1), src };
+  }
+
+  async function addImage(file) {
+    try {
+      attachments.push(await prepareImage(file));
+      renderAttachments();
+    } catch (err) {
+      notice(`Couldn't attach that image: ${err.message}`);
+    }
+  }
+
+  function renderAttachments() {
+    attachEl.hidden = !attachments.length;
+    attachEl.innerHTML = attachments.map((a, i) => `
+      <div class="chat-attachment">
+        <img src="${a.src}" alt="">
+        <button class="chat-attachment-remove" data-chat-action="remove-image" data-index="${i}" title="Remove" aria-label="Remove image">
+          <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>`).join('');
+  }
+
+  /** Sends `prompt` (a suggestion), or else what's typed, with any attached images. */
   function submit(prompt) {
     const text = (prompt || inputEl.value).trim();
-    if (!text) return;
+    if (!text && !attachments.length) return;
     if (!prompt) {
       inputEl.value = '';
       autosize();
     }
-    messages.push({ role: 'user', parts: [{ type: 'text', text }] });
+    const images = attachments;
+    attachments = [];
+    renderAttachments();
+    messages.push({
+      role: 'user',
+      parts: [...images.map((a) => ({ type: 'image', src: a.src })), ...(text ? [{ type: 'text', text }] : [])],
+    });
     messages.push({ role: 'assistant', parts: [] });
     setBusy(true);
     renderAll();
+    const ask = { text, images: images.map(({ mediaType, data }) => ({ mediaType, data })) };
     if (!port) {
-      connect(paper, { reconnect: true, ask: text });
+      connect(paper, { reconnect: true, ask });
       return;
     }
-    if (ready) port.postMessage({ type: 'ask', text });
-    else pendingAsk = text;
+    if (ready) port.postMessage({ type: 'ask', ...ask });
+    else pendingAsk = ask;
   }
 
   function interrupt() {
@@ -459,7 +545,7 @@
         if (msg.sessionId) sessionId = msg.sessionId;
         notice('');
         if (pendingAsk) {
-          port.postMessage({ type: 'ask', text: pendingAsk });
+          port.postMessage({ type: 'ask', ...pendingAsk });
           pendingAsk = null;
         }
         break;
@@ -514,7 +600,12 @@
 
   function messageHtml(message, isLast) {
     if (message.role === 'user') {
-      return `<div class="chat-msg is-user">${esc(message.parts.map((p) => p.text).join(''))}</div>`;
+      // Images from an earlier session come without pixels (see the host).
+      const images = message.parts.filter((p) => p.type === 'image').map((p) => (p.src
+        ? `<img class="chat-msg-image" src="${p.src}" alt="">`
+        : '<span class="chat-msg-image-chip">Image</span>')).join('');
+      const text = message.parts.filter((p) => p.type === 'text').map((p) => p.text).join('');
+      return `<div class="chat-msg is-user">${images ? `<div class="chat-msg-images">${images}</div>` : ''}${esc(text)}</div>`;
     }
     const body = message.parts.map(partHtml).join('');
     const thinking = isLast && busy && !message.parts.some((p) => p.type === 'text')
