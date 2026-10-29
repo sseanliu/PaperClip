@@ -43,6 +43,24 @@ You'll see your library — empty at first. Browse to any arXiv / OpenReview / e
 
 ---
 
+## Ask Claude Code about a paper
+
+In the reader, press **Option+Space** to open a chat with Claude Code about the open paper. It runs your own `claude` CLI through a native-messaging host (`native/claude_host.py`): your subscription login, settings, permission mode, CLAUDE.md, skills and MCP servers, with the paper's PDF in the session's working folder (`~/Library/Caches/PaperClip/claude/`). Answers stream in; tool calls that need approval show Allow / Deny. Each paper keeps its own conversation; reopening resumes it, **+** starts a new one.
+
+One-time setup:
+
+```bash
+native/install.sh   # registers the host with Chrome for this extension
+```
+
+Requires the Claude Code CLI to be installed and logged in.
+
+## Translate a selection
+
+Select text in the reader and its Simplified Chinese translation streams into a card under it (DeepSeek on DeepInfra); a word or short phrase gets its meaning in context. Paste a DeepInfra API key in Settings (gear, top right) first.
+
+---
+
 ## How it works
 
 ```

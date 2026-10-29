@@ -8,7 +8,9 @@
  * pages onto canvases. Pages render lazily as they scroll into view.
  *
  * Exposes window.PaperViewer = { open(paper, { focus }), close(), isOpen(),
- * isOpenFor(id) } for app.js (a non-module script) to call.
+ * isOpenFor(id), current() } for app.js (a non-module script) to call, and
+ * fires a `paperviewer:change` event on document whenever the open paper
+ * changes (detail { paper, pdfUrl }, or null once closed).
  */
 
 import * as pdfjsLib from './vendor/pdf.min.mjs';
@@ -21,6 +23,7 @@ const PAGE_GAP_SELECTOR_MARGIN = '600px'; // pre-render pages this far from view
 let panel, backdrop, titleEl, bodyEl, openTabBtn;
 let currentDoc = null;
 let currentPaperId = null;
+let currentPaper = null;
 let currentUrl = null;
 let pageObserver = null;
 let renderGeneration = 0; // invalidates in-flight renders when doc changes
@@ -144,7 +147,9 @@ async function open(paper, { focus = false } = {}) {
 
   const url = pdfUrlFor(paper);
   currentPaperId = paper.id;
+  currentPaper = paper;
   currentUrl = url || paper.url || null;
+  document.dispatchEvent(new CustomEvent('paperviewer:change', { detail: { paper, pdfUrl: url } }));
 
   titleEl.textContent = paper.title || paper.url || 'Untitled';
   titleEl.title = titleEl.textContent;
@@ -271,7 +276,9 @@ async function close() {
   if (backdrop) backdrop.hidden = true;
   document.body.classList.remove('pdf-panel-open');
   currentPaperId = null;
+  currentPaper = null;
   currentUrl = null;
+  document.dispatchEvent(new CustomEvent('paperviewer:change', { detail: null }));
   await teardownDoc();
   bodyEl.classList.remove('is-frame');
   bodyEl.innerHTML = '';
@@ -315,4 +322,8 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
-window.PaperViewer = { open, close, isOpen, isOpenFor };
+function current() {
+  return currentPaper ? { paper: currentPaper, pdfUrl: pdfUrlFor(currentPaper) } : null;
+}
+
+window.PaperViewer = { open, close, isOpen, isOpenFor, current };
