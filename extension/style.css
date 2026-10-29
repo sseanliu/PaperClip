@@ -1956,14 +1956,11 @@ body.pdf-panel-open {
   flex-direction: column;
 }
 
-.chat-label {
+.chat-paper {
+  /* The paper's title is the window's title. */
   font-size: 13px;
   font-weight: 500;
-}
-
-.chat-paper {
-  font-size: 11px;
-  color: var(--muted);
+  color: var(--ink);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;

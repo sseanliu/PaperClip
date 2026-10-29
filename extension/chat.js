@@ -178,7 +178,6 @@
     win.innerHTML = `
       <div class="chat-header">
         <div class="chat-heading">
-          <span class="chat-label">Claude Code</span>
           <span class="chat-paper" id="chatPaper"></span>
         </div>
         <button class="chat-icon-btn" data-chat-action="history" title="Earlier chats about this paper" aria-label="Earlier chats">
