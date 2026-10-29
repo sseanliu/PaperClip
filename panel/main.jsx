@@ -23,7 +23,7 @@ import {
   useSearch,
   useSelectionDimensions,
 } from "@anaralabs/lector";
-import { GlobalWorkerOptions } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { GlobalWorkerOptions, onDownloadProgress } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 
@@ -291,6 +291,33 @@ function useSystemScheme() {
   return useSyncExternalStore(subscribeScheme, () => (DARK_QUERY.matches ? "dark" : "light"));
 }
 
+const MB = 1024 * 1024;
+
+// Shown until the document is ready. While the file downloads, the bottom
+// edge fills with the share received; a server that sends no length gets a
+// sweeping bar instead. A PDF from the local cache never shows one.
+function LoadingCard() {
+  const [progress, setProgress] = useState(null);
+  useEffect(() => onDownloadProgress(({ loaded, total }) => setProgress({ loaded, total })), []);
+  const known = progress && progress.total > 0;
+  const size = progress && progress.loaded > 0
+    ? known
+      ? `${(progress.loaded / MB).toFixed(1)} / ${(progress.total / MB).toFixed(1)} MB`
+      : `${(progress.loaded / MB).toFixed(1)} MB`
+    : "";
+  return (
+    <div className="lector-loading">
+      <span>Loading PDF…</span>
+      {size && <span className="lector-loading-size">{size}</span>}
+      {progress && (
+        <div className={`lector-loading-bar${known ? "" : " is-unknown"}`}>
+          <div style={known ? { transform: `scaleX(${Math.min(1, progress.loaded / progress.total)})` } : undefined} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Viewer({ source, onError, onLoad, pageWidth = 1000, title, onClose, onOpenTab }) {
   const scheme = useSystemScheme();
   const [showThumbs, setShowThumbs] = useState(false);
@@ -310,7 +337,7 @@ function Viewer({ source, onError, onLoad, pageWidth = 1000, title, onClose, onO
         proxy.getPage(1).then(patchTextContentFonts).catch(() => {});
         onLoad?.(proxy);
       }}
-      loader={<div className="lector-loading">Loading PDF…</div>}
+      loader={<LoadingCard />}
     >
       <SelectionWatcher />
       <InitialZoom pageWidth={pageWidth} />

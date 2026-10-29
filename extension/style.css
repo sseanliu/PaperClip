@@ -1583,6 +1583,8 @@ body.pdf-panel-open {
 }
 
 .lector-loading {
+  position: relative;
+  overflow: hidden;
   width: fit-content;
   margin: 48px auto 0;
   border-radius: 12px;
@@ -1591,6 +1593,40 @@ body.pdf-panel-open {
   font-family: 'DM Sans', sans-serif;
   font-size: 13px;
   color: var(--muted);
+}
+
+.lector-loading-size {
+  margin-left: 10px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Download progress along the card's bottom edge. */
+.lector-loading-bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: var(--warm-gray);
+}
+
+.lector-loading-bar > div {
+  height: 100%;
+  background: var(--accent-amber);
+  transform-origin: left;
+  transform: scaleX(0);
+  transition: transform 160ms ease-out;
+}
+
+.lector-loading-bar.is-unknown > div {
+  width: 30%;
+  transform: none;
+  animation: lector-loading-sweep 1.2s ease-in-out infinite;
+}
+
+@keyframes lector-loading-sweep {
+  from { translate: -100% 0; }
+  to { translate: 333% 0; }
 }
 
 /* pdf.js text layer, scoped port of the official stylesheet (the global file
