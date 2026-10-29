@@ -1382,6 +1382,19 @@ body.pdf-panel-open {
   box-shadow: 0 3px 10px var(--shadow);
 }
 
+/* Dark mode: covers are rendered light (white paper); flip them so the
+   gallery reads as dark pages. invert(0.88) lands white paper near the dark
+   card color and black text near the light ink; hue-rotate puts colored
+   charts back on their original hues; a touch of sepia warms the grays to
+   the palette. Photos in covers come out like negatives (accepted: covers
+   are for recognizing a paper, not for viewing its figures). */
+@media (prefers-color-scheme: dark) {
+  .paper-card-thumb,
+  .paper-thumb {
+    filter: invert(0.88) hue-rotate(180deg) sepia(0.12);
+  }
+}
+
 .paper-card-thumb {
   display: block;
   width: 100%;
