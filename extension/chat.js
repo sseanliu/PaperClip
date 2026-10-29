@@ -29,7 +29,10 @@
   let ready = false;
   let busy = false;
   let pendingAsk = null; // { text, images } sent before the session was ready
-  let attachments = []; // pasted/dropped images: { mediaType, data (base64), src (data URL) }
+  // Pasted/dropped images: { mediaType, data (base64), src (data URL) }.
+  // An equation clicked in the reader also carries kind 'equation', label,
+  // page, and latex once read (null while reading or if it couldn't be).
+  let attachments = [];
   let attachEl = null;
   let messages = []; // { role: 'user' | 'assistant', parts: [...] }
   let sessionId = null; // the session on screen, once the host knows it
@@ -615,28 +618,115 @@
     }
   }
 
+  // ---- Equations from the reader -------------------------------------------------
+  //
+  // A click on a display equation (panel/main.jsx) sends its crop here. A
+  // vision model on DeepInfra (the translation key) reads it as LaTeX; the
+  // chip then shows it rendered, and Claude gets the LaTeX with the equation
+  // number and page. Without a key, or if the reading fails, the crop goes
+  // to Claude as an image.
+  const LATEX_ENDPOINT = 'https://api.deepinfra.com/v1/openai/chat/completions';
+  const LATEX_MODEL = 'Qwen/Qwen3-VL-30B-A3B-Instruct';
+  const LATEX_PROMPT = 'This image is one display equation from a scientific paper. Transcribe it to LaTeX exactly '
+    + 'as printed. Reply with only the LaTeX of the math: no $ or \\[ delimiters, no equation number or \\tag, '
+    + 'no explanation. Use an aligned environment for several rows.';
+
+  async function readLatex(src) {
+    const { deepinfraKey } = await chrome.storage.local.get('deepinfraKey');
+    if (!deepinfraKey) return null;
+    const response = await fetch(LATEX_ENDPOINT, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${deepinfraKey}`, 'Content-Type': 'application/json' },
+      signal: AbortSignal.timeout(30 * 1000),
+      body: JSON.stringify({
+        model: LATEX_MODEL,
+        temperature: 0,
+        max_tokens: 1000,
+        messages: [{ role: 'user', content: [
+          { type: 'image_url', image_url: { url: src } },
+          { type: 'text', text: LATEX_PROMPT },
+        ] }],
+      }),
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const json = await response.json();
+    let tex = ((json.choices && json.choices[0] && json.choices[0].message && json.choices[0].message.content) || '').trim();
+    // Strip what models add anyway: fences, delimiters, an equation number.
+    tex = tex.replace(/^```(?:latex|tex)?\s*|\s*```$/g, '')
+      .replace(/^\$\$|\$\$$/g, '').replace(/^\\\[|\\\]$/g, '')
+      .replace(/\\begin\{(equation|align|gather)\*?\}|\\end\{(equation|align|gather)\*?\}/g, '')
+      .replace(/\\tag\{[^}]*\}/g, '').replace(/(?:\s|\\q?quad)+\(\d+(\.\d+)*\)\s*$/, '')
+      .trim();
+    if (!tex) return null;
+    // Only LaTeX KaTeX can render is kept; otherwise the image goes instead.
+    if (window.katex) window.katex.renderToString(tex, { displayMode: true, throwOnError: true, strict: 'ignore' });
+    return tex;
+  }
+
+  function addEquation({ src, label, page }) {
+    if (!isShown()) show();
+    const eq = { kind: 'equation', src, mediaType: 'image/png', data: src.slice(src.indexOf(',') + 1), label, page, latex: null };
+    eq.reading = readLatex(src)
+      .then((tex) => { eq.latex = tex; })
+      .catch((err) => console.warn('[paperclip] equation LaTeX failed', err && err.message))
+      .finally(() => {
+        eq.reading = null;
+        renderAttachments();
+      });
+    attachments.push(eq);
+    renderAttachments();
+    inputEl.focus();
+  }
+
+  document.addEventListener('paperclip:equation', (e) => addEquation(e.detail));
+
+  function attachmentHtml(a) {
+    if (a.kind !== 'equation') return `<img src="${a.src}" alt="">`;
+    const tag = a.label ? `<span class="chat-equation-label">${esc(a.label)}</span>` : '';
+    const body = a.latex
+      ? texHtml(a.latex, true)
+      : `<img class="chat-equation-image" src="${a.src}" alt="Equation ${esc(a.label || '')}">`;
+    return `<div class="chat-equation${a.reading ? ' is-reading' : ''}">${body}${tag}</div>`;
+  }
+
   function renderAttachments() {
     attachEl.hidden = !attachments.length;
     attachEl.innerHTML = attachments.map((a, i) => `
-      <div class="chat-attachment">
-        <img src="${a.src}" alt="">
+      <div class="chat-attachment${a.kind === 'equation' ? ' is-equation' : ''}">
+        ${attachmentHtml(a)}
         <button class="chat-attachment-remove" data-chat-action="remove-image" data-index="${i}" title="Remove" aria-label="Remove image">
           <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
         </button>
       </div>`).join('');
   }
 
-  /** Sends `prompt` (a suggestion), or else what's typed, with any attached images. */
-  function submit(prompt) {
-    const text = (prompt || inputEl.value).trim();
+  /**
+   * Sends `prompt` (a suggestion), or else what's typed, with any attached
+   * images and equations. Equations still being read are waited for.
+   */
+  async function submit(prompt) {
+    let text = (prompt || inputEl.value).trim();
     if (!text && !attachments.length) return;
     if (!prompt) {
       inputEl.value = '';
       autosize();
     }
-    const images = attachments;
+    const attached = attachments;
     attachments = [];
     renderAttachments();
+    const reading = attached.filter((a) => a.reading).map((a) => a.reading);
+    if (reading.length) {
+      notice('Reading the equation…');
+      await Promise.all(reading);
+      notice('');
+    }
+    // Equations read as LaTeX go into the text, numbered and paged; the
+    // rest (pictures, equations that couldn't be read) as images.
+    const where = (a) => `${a.label ? `Equation ${a.label}` : 'An equation'} (page ${a.page} of the paper)`;
+    const equations = attached.filter((a) => a.kind === 'equation');
+    const intro = equations.map((a) => (a.latex ? `${where(a)}:\n$$${a.latex}$$` : `${where(a)}, attached as an image.`)).join('\n\n');
+    text = [intro, text].filter(Boolean).join('\n\n');
+    const images = attached.filter((a) => !(a.kind === 'equation' && a.latex));
     messages.push({
       role: 'user',
       parts: [...images.map((a) => ({ type: 'image', src: a.src })), ...(text ? [{ type: 'text', text }] : [])],
@@ -824,7 +914,13 @@
         ? `<img class="chat-msg-image" src="${p.src}" alt="">`
         : '<span class="chat-msg-image-chip">Image</span>')).join('');
       const text = message.parts.filter((p) => p.type === 'text').map((p) => p.text).join('');
-      return `<div class="chat-msg is-user">${images ? `<div class="chat-msg-images">${images}</div>` : ''}${esc(text)}</div>`;
+      // Math renders here too: an equation from the reader arrives as $$..$$,
+      // a block of its own (the line breaks around it would only add space).
+      const stash = [];
+      const body = esc(stashMath(text, stash))
+        .replace(/\n*(\uE000(\d+)\uE001)\n*/g, (m, token, n) => (stash[n].includes('katex-display') ? token : m))
+        .replace(/\uE000(\d+)\uE001/g, (_, n) => stash[n]);
+      return `<div class="chat-msg is-user">${images ? `<div class="chat-msg-images">${images}</div>` : ''}${body}</div>`;
     }
     const body = message.parts.map(partHtml).join('');
     const thinking = isLast && busy && !message.parts.some((p) => p.type === 'text')

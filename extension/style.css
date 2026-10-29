@@ -16,6 +16,7 @@
   --detail-bg: rgba(232, 226, 218, 0.18);
   --page-shadow: rgba(26, 22, 19, 0.12);
   --popover-shadow: rgba(26, 22, 19, 0.18);
+  --eq-shadow: rgba(26, 22, 19, 0.35);
   --on-accent: #fffdf9;
   --bar-bg: #1a1613;
   --bar-fg: #f8f5f0;
@@ -43,6 +44,7 @@
     --detail-bg: rgba(255, 253, 249, 0.025);
     --page-shadow: rgba(0, 0, 0, 0.5);
     --popover-shadow: rgba(0, 0, 0, 0.55);
+    --eq-shadow: rgba(0, 0, 0, 0.9);
     --bar-bg: #2b2723;
     --bar-fg: #ebe5dc;
     --bar-fg-quiet: rgba(235, 229, 220, 0.65);
@@ -1453,6 +1455,7 @@ body.pdf-panel-open {
    the palette. Photos in covers come out like negatives (accepted: covers
    are for recognizing a paper, not for viewing its figures). */
 @media (prefers-color-scheme: dark) {
+  .chat-equation-image,
   .paper-card-thumb,
   .paper-thumb {
     filter: invert(0.88) hue-rotate(180deg) sepia(0.12);
@@ -1708,6 +1711,29 @@ body.pdf-panel-open {
 .lector-sel {
   position: absolute;
   background: rgba(90, 122, 98, 0.22);
+}
+
+/* Display equations (panel/main.jsx EquationLayer): nothing shows until the
+   pointer is on one, then a soft shadow settles under the formula; a click
+   hands it to the Claude chat. */
+.lector-eq-layer {
+  position: absolute;
+  inset: 0;
+  /* Above the text (0) and link (3) layers, so the click lands here. */
+  z-index: 4;
+  pointer-events: none;
+}
+
+.lector-eq {
+  position: absolute;
+  border-radius: 6px;
+  cursor: pointer;
+  pointer-events: auto;
+  transition: box-shadow 0.18s ease-out;
+}
+
+.lector-eq:hover {
+  box-shadow: 0 6px 10px -4px var(--eq-shadow);
 }
 
 /* ---- Lector full viewer chrome ---- */
@@ -2414,6 +2440,51 @@ body.pdf-panel-open {
   object-fit: cover;
   border: 1px solid var(--warm-gray);
   border-radius: 8px;
+}
+
+/* An equation from the reader: rendered LaTeX (or its crop while it's
+   read, or if it couldn't be), with its number. */
+.chat-attachment.is-equation {
+  max-width: 100%;
+}
+
+.chat-equation {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 100%;
+  min-height: 48px;
+  padding: 6px 14px;
+  overflow-x: auto;
+  border: 1px solid var(--warm-gray);
+  border-radius: 8px;
+  color: var(--ink);
+  transition: opacity 0.2s;
+}
+
+.chat-equation.is-reading {
+  opacity: 0.55;
+}
+
+.chat-equation .katex-display {
+  margin: 0;
+}
+
+.chat-msg.is-user .katex-display {
+  margin: 8px 0;
+}
+
+.chat-equation-image {
+  display: block;
+  max-width: 100%;
+  max-height: 72px;
+}
+
+.chat-equation-label {
+  flex: none;
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--muted);
 }
 
 .chat-attachment-remove {

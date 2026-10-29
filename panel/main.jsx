@@ -26,6 +26,7 @@ import {
 import { GlobalWorkerOptions, onDownloadProgress } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
+import { findEquations } from "./equations.js";
 
 GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("vendor/lector-pdf.worker.min.mjs");
 
@@ -206,6 +207,83 @@ function SelectionRects({ pageNumber }) {
           key={i}
           className="lector-sel"
           style={{ top: r.top, left: r.left, width: r.width, height: r.height }}
+        />
+      ))}
+    </div>
+  );
+}
+
+// ---- Equations: click one to hand it to the Claude chat -------------------------
+
+// Display equations per page (equations.js), found once per page proxy.
+const equationsByPage = new WeakMap();
+
+function equationsOf(pageProxy) {
+  if (!equationsByPage.has(pageProxy)) {
+    equationsByPage.set(pageProxy, findEquations(pageProxy).catch((err) => {
+      console.warn("[paperclip] equation detection failed", err);
+      return [];
+    }));
+  }
+  return equationsByPage.get(pageProxy);
+}
+
+// The equation as a crisp PNG (about 3x), dark on white whatever the
+// reader's scheme, for the chat chip and the LaTeX reading.
+async function equationImage(pageProxy, q) {
+  const width = q.x1 - q.x0;
+  const height = q.y1 - q.y0;
+  const scale = Math.min(4, 2400 / width);
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.ceil(width * scale);
+  canvas.height = Math.ceil(height * scale);
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  const viewport = pageProxy.getViewport({ scale, offsetX: -q.x0 * scale, offsetY: -q.y0 * scale });
+  await pageProxy.render({ canvasContext: ctx, viewport }).promise;
+  return canvas.toDataURL("image/png");
+}
+
+// Equations on one page: invisible until hovered (a soft shadow under the
+// formula); a click hands the equation to the chat (chat.js listens for
+// paperclip:equation).
+function EquationLayer({ pageNumber }) {
+  const getPdfPageProxy = usePdf((s) => s.getPdfPageProxy);
+  const [found, setFound] = useState([]);
+  useEffect(() => {
+    let alive = true;
+    let pageProxy = null;
+    try {
+      pageProxy = getPdfPageProxy(pageNumber);
+    } catch {}
+    if (!pageProxy) return undefined;
+    equationsOf(pageProxy).then((eqs) => {
+      if (alive) setFound(eqs.map((q) => ({ ...q, pageProxy })));
+    });
+    return () => {
+      alive = false;
+    };
+  }, [getPdfPageProxy, pageNumber]);
+  if (!found.length) return null;
+  const pick = async (q) => {
+    try {
+      const src = await equationImage(q.pageProxy, q);
+      document.dispatchEvent(new CustomEvent("paperclip:equation", { detail: { src, label: q.label, page: pageNumber } }));
+    } catch (err) {
+      console.warn("[paperclip] equation crop failed", err);
+    }
+  };
+  return (
+    <div className="lector-eq-layer">
+      {found.map((q, i) => (
+        <div
+          key={i}
+          className="lector-eq"
+          title={q.label ? `Ask Claude about equation ${q.label}` : "Ask Claude about this equation"}
+          // The page box is laid out in PDF points and scaled as a whole.
+          style={{ left: q.x0, top: q.y0, width: q.x1 - q.x0, height: q.y1 - q.y0 }}
+          onClick={() => pick(q)}
         />
       ))}
     </div>
@@ -461,6 +539,7 @@ function Viewer({ source, onError, onLoad, pageWidth = 1000, title, onClose, onO
                 <AnnotationLayer />
                 <HighlightLayer className="lector-hl" />
                 <CustomLayer>{(n) => <SelectionRects pageNumber={n} />}</CustomLayer>
+                <CustomLayer>{(n) => <EquationLayer pageNumber={n} />}</CustomLayer>
               </Page>
             </Pages>
             {showSearch && <SearchPane onClose={() => setShowSearch(false)} />}
