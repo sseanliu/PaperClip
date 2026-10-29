@@ -12,6 +12,8 @@
 (function () {
   const HOST = 'com.xiaoan.paperclip.claude';
   const MAX_SAVED_MESSAGES = 100;
+  const POSITION_KEY = 'paperclip-chat-position';
+  const KEEP_VISIBLE_PX = 80; // a dragged window keeps this much on screen
 
   let win = null;
   let listEl = null;
@@ -115,6 +117,57 @@
       }
     });
     inputEl.addEventListener('input', autosize);
+
+    // Drag the header to move the window; double-click it to re-center.
+    const header = win.querySelector('.chat-header');
+    header.addEventListener('pointerdown', startDrag);
+    header.addEventListener('dblclick', (e) => {
+      if (e.target.closest('button')) return;
+      win.classList.remove('is-placed');
+      win.style.left = '';
+      win.style.top = '';
+      try { localStorage.removeItem(POSITION_KEY); } catch {}
+    });
+    try {
+      const saved = JSON.parse(localStorage.getItem(POSITION_KEY) || 'null');
+      if (saved) placeAt(saved.left, saved.top);
+    } catch {}
+    addEventListener('resize', () => {
+      if (win.classList.contains('is-placed')) placeAt(parseFloat(win.style.left), parseFloat(win.style.top));
+    });
+  }
+
+  /** Moves the window so its top-left is at (left, top), keeping it reachable. */
+  function placeAt(left, top) {
+    const width = win.offsetWidth || 680;
+    win.classList.add('is-placed');
+    win.style.left = `${Math.round(Math.min(innerWidth - KEEP_VISIBLE_PX, Math.max(KEEP_VISIBLE_PX - width, left)))}px`;
+    win.style.top = `${Math.round(Math.min(innerHeight - 48, Math.max(0, top)))}px`;
+  }
+
+  function startDrag(e) {
+    if (e.button !== 0 || e.target.closest('button')) return;
+    e.preventDefault();
+    const header = e.currentTarget;
+    const rect = win.getBoundingClientRect();
+    const dx = e.clientX - rect.left;
+    const dy = e.clientY - rect.top;
+    header.setPointerCapture(e.pointerId);
+    document.body.classList.add('chat-dragging');
+    const move = (ev) => placeAt(ev.clientX - dx, ev.clientY - dy);
+    const end = () => {
+      header.removeEventListener('pointermove', move);
+      header.removeEventListener('pointerup', end);
+      header.removeEventListener('pointercancel', end);
+      document.body.classList.remove('chat-dragging');
+      if (!win.classList.contains('is-placed')) return;
+      try {
+        localStorage.setItem(POSITION_KEY, JSON.stringify({ left: parseFloat(win.style.left), top: parseFloat(win.style.top) }));
+      } catch {}
+    };
+    header.addEventListener('pointermove', move);
+    header.addEventListener('pointerup', end);
+    header.addEventListener('pointercancel', end);
   }
 
   function autosize() {

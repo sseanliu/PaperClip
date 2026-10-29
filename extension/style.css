@@ -1889,12 +1889,34 @@ body.pdf-panel-open {
   to   { opacity: 1; transform: translateX(-50%); }
 }
 
+/* Dragged somewhere (chat.js sets left/top). */
+.chat-window.is-placed {
+  transform: none;
+  animation: chat-in-placed 0.16s ease-out;
+}
+
+@keyframes chat-in-placed {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+body.chat-dragging {
+  cursor: grabbing;
+  user-select: none;
+}
+
 .chat-header {
   display: flex;
   align-items: center;
   gap: 4px;
   padding: 10px 10px 10px 16px;
   border-bottom: 1px solid var(--warm-gray);
+  cursor: grab;
+  user-select: none;
+}
+
+body.chat-dragging .chat-header {
+  cursor: grabbing;
 }
 
 .chat-heading {
