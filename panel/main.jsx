@@ -23,10 +23,11 @@ import {
   useSearch,
   useSelectionDimensions,
 } from "@anaralabs/lector";
-import { GlobalWorkerOptions, onDownloadProgress } from "pdfjs-dist/legacy/build/pdf.mjs";
+import { GlobalWorkerOptions, OPS, onDownloadProgress } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import { findEquations } from "./equations.js";
+import { findFigures } from "./figures.js";
 
 GlobalWorkerOptions.workerSrc = chrome.runtime.getURL("vendor/lector-pdf.worker.min.mjs");
 
@@ -213,42 +214,54 @@ function SelectionRects({ pageNumber }) {
   );
 }
 
-// ---- Equations: click one to hand it to the Claude chat -------------------------
+// ---- Equations and figures: click one to hand it to the Claude chat -----------
 
-// Display equations per page (equations.js), found once per page proxy.
-const equationsByPage = new WeakMap();
+// What can be picked on a page, found once per page proxy: display equations
+// (equations.js) and figures (figures.js). `hit` is the clickable box; a
+// figure's caption stays out of it, so its text can still be selected.
+const picksByPage = new WeakMap();
 
-function equationsOf(pageProxy) {
-  if (!equationsByPage.has(pageProxy)) {
-    equationsByPage.set(pageProxy, findEquations(pageProxy).catch((err) => {
-      console.warn("[paperclip] equation detection failed", err);
+function picksOf(pageProxy) {
+  if (!picksByPage.has(pageProxy)) {
+    const failed = (what) => (err) => {
+      console.warn(`[paperclip] ${what} detection failed`, err);
       return [];
-    }));
+    };
+    picksByPage.set(pageProxy, Promise.all([
+      findEquations(pageProxy).catch(failed("equation")),
+      findFigures(pageProxy, OPS).catch(failed("figure")),
+    ]).then(([equations, figures]) => [
+      ...equations.map((q) => ({ ...q, kind: "equation", hit: q })),
+      ...figures.map((f) => ({ ...f, kind: "figure", hit: { x0: f.x0, x1: f.x1, y0: f.figTop, y1: f.figBottom } })),
+    ]));
   }
-  return equationsByPage.get(pageProxy);
+  return picksByPage.get(pageProxy);
 }
 
-// The equation as a crisp PNG (about 3x), dark on white whatever the
-// reader's scheme, for the chat chip and the LaTeX reading.
-async function equationImage(pageProxy, q) {
-  const width = q.x1 - q.x0;
-  const height = q.y1 - q.y0;
-  const scale = Math.min(4, 2400 / width);
+// A region of the page as an image, dark on white whatever the reader's
+// scheme: an equation at about 3x (crisp for the LaTeX reading), a figure
+// with its caption at up to 2000px on its long side, as JPEG when a PNG
+// would be large (photos).
+async function regionImage(pageProxy, r, maxScale, maxSide) {
+  const width = r.x1 - r.x0;
+  const height = r.y1 - r.y0;
+  const scale = Math.min(maxScale, maxSide / Math.max(width, height));
   const canvas = document.createElement("canvas");
   canvas.width = Math.ceil(width * scale);
   canvas.height = Math.ceil(height * scale);
   const ctx = canvas.getContext("2d");
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-  const viewport = pageProxy.getViewport({ scale, offsetX: -q.x0 * scale, offsetY: -q.y0 * scale });
+  const viewport = pageProxy.getViewport({ scale, offsetX: -r.x0 * scale, offsetY: -r.y0 * scale });
   await pageProxy.render({ canvasContext: ctx, viewport }).promise;
-  return canvas.toDataURL("image/png");
+  const png = canvas.toDataURL("image/png");
+  return png.length > 2_000_000 ? canvas.toDataURL("image/jpeg", 0.9) : png;
 }
 
-// Equations on one page: invisible (the pointer turns into a hand over one);
-// a click hands the equation to the chat (chat.js listens for
-// paperclip:equation).
-function EquationLayer({ pageNumber }) {
+// Equations and figures on one page: invisible (the pointer turns into a
+// hand over one); a click hands it to the chat (chat.js listens for
+// paperclip:equation and paperclip:figure).
+function PickLayer({ pageNumber }) {
   const getPdfPageProxy = usePdf((s) => s.getPdfPageProxy);
   const [found, setFound] = useState([]);
   useEffect(() => {
@@ -258,32 +271,37 @@ function EquationLayer({ pageNumber }) {
       pageProxy = getPdfPageProxy(pageNumber);
     } catch {}
     if (!pageProxy) return undefined;
-    equationsOf(pageProxy).then((eqs) => {
-      if (alive) setFound(eqs.map((q) => ({ ...q, pageProxy })));
+    picksOf(pageProxy).then((picks) => {
+      if (alive) setFound(picks.map((p) => ({ ...p, pageProxy })));
     });
     return () => {
       alive = false;
     };
   }, [getPdfPageProxy, pageNumber]);
   if (!found.length) return null;
-  const pick = async (q) => {
+  const pick = async (p) => {
     try {
-      const src = await equationImage(q.pageProxy, q);
-      document.dispatchEvent(new CustomEvent("paperclip:equation", { detail: { src, label: q.label, page: pageNumber } }));
+      const src = p.kind === "equation"
+        ? await regionImage(p.pageProxy, p, 4, 2400)
+        : await regionImage(p.pageProxy, p, 3, 2000);
+      document.dispatchEvent(new CustomEvent(`paperclip:${p.kind}`, { detail: { src, label: p.label, page: pageNumber } }));
     } catch (err) {
-      console.warn("[paperclip] equation crop failed", err);
+      console.warn(`[paperclip] ${p.kind} crop failed`, err);
     }
   };
+  const titleOf = (p) => (p.kind === "figure"
+    ? `Ask Claude about ${p.label}`
+    : p.label ? `Ask Claude about equation ${p.label}` : "Ask Claude about this equation");
   return (
-    <div className="lector-eq-layer">
-      {found.map((q, i) => (
+    <div className="lector-pick-layer">
+      {found.map((p, i) => (
         <div
           key={i}
-          className="lector-eq"
-          title={q.label ? `Ask Claude about equation ${q.label}` : "Ask Claude about this equation"}
+          className="lector-pick"
+          title={titleOf(p)}
           // The page box is laid out in PDF points and scaled as a whole.
-          style={{ left: q.x0, top: q.y0, width: q.x1 - q.x0, height: q.y1 - q.y0 }}
-          onClick={() => pick(q)}
+          style={{ left: p.hit.x0, top: p.hit.y0, width: p.hit.x1 - p.hit.x0, height: p.hit.y1 - p.hit.y0 }}
+          onClick={() => pick(p)}
         />
       ))}
     </div>
@@ -539,7 +557,7 @@ function Viewer({ source, onError, onLoad, pageWidth = 1000, title, onClose, onO
                 <AnnotationLayer />
                 <HighlightLayer className="lector-hl" />
                 <CustomLayer>{(n) => <SelectionRects pageNumber={n} />}</CustomLayer>
-                <CustomLayer>{(n) => <EquationLayer pageNumber={n} />}</CustomLayer>
+                <CustomLayer>{(n) => <PickLayer pageNumber={n} />}</CustomLayer>
               </Page>
             </Pages>
             {showSearch && <SearchPane onClose={() => setShowSearch(false)} />}

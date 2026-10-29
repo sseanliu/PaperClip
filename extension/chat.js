@@ -31,7 +31,8 @@
   let pendingAsk = null; // { text, images } sent before the session was ready
   // Pasted/dropped images: { mediaType, data (base64), src (data URL) }.
   // An equation clicked in the reader also carries kind 'equation', label,
-  // page, and latex once read (null while reading or if it couldn't be).
+  // page, and latex once read (null while reading or if it couldn't be); a
+  // figure clicked there, kind 'figure', label ("Figure 2") and page.
   let attachments = [];
   let attachEl = null;
   let messages = []; // { role: 'user' | 'assistant', parts: [...] }
@@ -693,7 +694,22 @@
 
   document.addEventListener('paperclip:equation', (e) => addEquation(e.detail));
 
+  // A figure (with its caption) goes to Claude as the image it is.
+  function addFigure({ src, label, page }) {
+    if (!isShown()) show();
+    const mediaType = src.slice(5, src.indexOf(';'));
+    attachments.push({ kind: 'figure', src, mediaType, data: src.slice(src.indexOf(',') + 1), label, page });
+    renderAttachments();
+    inputEl.focus();
+  }
+
+  document.addEventListener('paperclip:figure', (e) => addFigure(e.detail));
+
   function attachmentHtml(a) {
+    if (a.kind === 'figure') {
+      return `<div class="chat-equation"><img class="chat-figure-image" src="${a.src}" alt="${esc(a.label)}">`
+        + `<span class="chat-equation-label">${esc(a.label)}</span></div>`;
+    }
     if (a.kind !== 'equation') return `<img src="${a.src}" alt="">`;
     const tag = a.label ? `<span class="chat-equation-label">${esc(a.label)}</span>` : '';
     const body = a.latex
@@ -705,7 +721,7 @@
   function renderAttachments() {
     attachEl.hidden = !attachments.length;
     attachEl.innerHTML = attachments.map((a, i) => `
-      <div class="chat-attachment${a.kind === 'equation' ? ' is-equation' : ''}">
+      <div class="chat-attachment${a.kind ? ' is-equation' : ''}">
         ${attachmentHtml(a)}
         <button class="chat-attachment-remove" data-chat-action="remove-image" data-index="${i}" title="Remove" aria-label="Remove image">
           <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
@@ -736,8 +752,10 @@
     // Equations read as LaTeX go into the text, numbered and paged; the
     // rest (pictures, equations that couldn't be read) as images.
     const where = (a) => `${a.label ? `Equation ${a.label}` : 'An equation'} (page ${a.page} of the paper)`;
-    const equations = attached.filter((a) => a.kind === 'equation');
-    const intro = equations.map((a) => (a.latex ? `${where(a)}:\n$$${a.latex}$$` : `${where(a)}, attached as an image.`)).join('\n\n');
+    const intro = attached.filter((a) => a.kind).map((a) => {
+      if (a.kind === 'figure') return `${a.label} (page ${a.page} of the paper), attached as an image.`;
+      return a.latex ? `${where(a)}:\n$$${a.latex}$$` : `${where(a)}, attached as an image.`;
+    }).join('\n\n');
     text = [intro, text].filter(Boolean).join('\n\n');
     const images = attached.filter((a) => !(a.kind === 'equation' && a.latex));
     messages.push({

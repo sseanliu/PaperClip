@@ -1711,10 +1711,10 @@ body.pdf-panel-open {
   background: rgba(90, 122, 98, 0.22);
 }
 
-/* Display equations (panel/main.jsx EquationLayer): nothing shows; the
-   pointer turns into a hand over one, and a click hands it to the Claude
-   chat. */
-.lector-eq-layer {
+/* Display equations and figures (panel/main.jsx PickLayer): nothing
+   shows; the pointer turns into a hand over one, and a click hands it to
+   the Claude chat. */
+.lector-pick-layer {
   position: absolute;
   inset: 0;
   /* Above the text (0) and link (3) layers, so the click lands here. */
@@ -1722,7 +1722,7 @@ body.pdf-panel-open {
   pointer-events: none;
 }
 
-.lector-eq {
+.lector-pick {
   position: absolute;
   cursor: pointer;
   pointer-events: auto;
@@ -2466,7 +2466,9 @@ body.pdf-panel-open {
   margin: 8px 0;
 }
 
-/* The whole formula, not the square thumbnail of a pasted picture. */
+/* The whole formula or figure, not the square thumbnail of a pasted
+   picture. */
+.chat-attachment .chat-figure-image,
 .chat-attachment .chat-equation-image {
   display: block;
   width: auto;
@@ -2478,6 +2480,11 @@ body.pdf-panel-open {
   object-fit: contain;
   border: 0;
   border-radius: 0;
+}
+
+.chat-attachment .chat-figure-image {
+  max-height: 64px;
+  border-radius: 4px;
 }
 
 .chat-equation-label {
