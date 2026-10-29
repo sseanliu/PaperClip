@@ -97,6 +97,8 @@
   const BULLET = /^\s*[-*]\s+/;
   const NUMBERED = /^\s*\d+[.)]\s+/;
   const HEADING = /^#{1,4}\s+(.*)$/;
+  // A thematic break: ---, *** or ___ (spaces between allowed), alone on a line.
+  const RULE = /^\s*([-*_])(?:\s*\1){2,}\s*$/;
 
   /**
    * One block (no blank line inside) as HTML. A block can mix kinds, e.g. a
@@ -107,13 +109,14 @@
   function blockHtml(lines) {
     const runs = [];
     for (const line of lines) {
-      const kind = HEADING.test(line) ? 'h' : BULLET.test(line) ? 'ul' : NUMBERED.test(line) ? 'ol' : 'p';
+      const kind = RULE.test(line) ? 'hr' : HEADING.test(line) ? 'h' : BULLET.test(line) ? 'ul' : NUMBERED.test(line) ? 'ol' : 'p';
       const last = runs[runs.length - 1];
-      if (last && last.kind === kind && kind !== 'h') last.lines.push(line);
+      if (last && last.kind === kind && kind !== 'h' && kind !== 'hr') last.lines.push(line);
       else runs.push({ kind, lines: [line] });
     }
     return runs.map((run, i) => {
-      const tight = i < runs.length - 1 ? ' class="is-tight"' : '';
+      if (run.kind === 'hr') return '<hr>';
+      const tight = i < runs.length - 1 && runs[i + 1].kind !== 'hr' ? ' class="is-tight"' : '';
       if (run.kind === 'h') return `<h4${tight}>${inline(run.lines[0].match(HEADING)[1])}</h4>`;
       if (run.kind === 'ul') return `<ul${tight}>${run.lines.map((l) => `<li>${inline(l.replace(BULLET, ''))}</li>`).join('')}</ul>`;
       if (run.kind === 'ol') return `<ol${tight}>${run.lines.map((l) => `<li>${inline(l.replace(NUMBERED, ''))}</li>`).join('')}</ol>`;

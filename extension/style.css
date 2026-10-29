@@ -2180,6 +2180,13 @@ body.pdf-panel-open {
   padding-left: 20px;
 }
 
+.chat-md hr {
+  /* With the block above's 14px: 20px of space on each side of the line. */
+  margin: 6px 0 20px;
+  border: 0;
+  border-top: 1px solid var(--warm-gray);
+}
+
 .chat-md h4 {
   margin: 20px 0 6px;
   font-size: 14px;
