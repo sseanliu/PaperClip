@@ -90,16 +90,31 @@
     }).join('');
   }
 
+  const BULLET = /^\s*[-*]\s+/;
+  const NUMBERED = /^\s*\d+[.)]\s+/;
+  const HEADING = /^#{1,4}\s+(.*)$/;
+
+  /**
+   * One block (no blank line inside) as HTML. A block can mix kinds, e.g. a
+   * bold label line followed by "- " items, so consecutive lines of one kind
+   * become one paragraph, list or heading. Runs inside a block sit close
+   * together; blocks are spaced apart (CSS).
+   */
   function blockHtml(lines) {
-    const heading = lines.length === 1 && lines[0].match(/^#{1,4}\s+(.*)$/);
-    if (heading) return `<h4>${inline(heading[1])}</h4>`;
-    if (lines.every((l) => /^\s*[-*]\s+/.test(l))) {
-      return `<ul>${lines.map((l) => `<li>${inline(l.replace(/^\s*[-*]\s+/, ''))}</li>`).join('')}</ul>`;
+    const runs = [];
+    for (const line of lines) {
+      const kind = HEADING.test(line) ? 'h' : BULLET.test(line) ? 'ul' : NUMBERED.test(line) ? 'ol' : 'p';
+      const last = runs[runs.length - 1];
+      if (last && last.kind === kind && kind !== 'h') last.lines.push(line);
+      else runs.push({ kind, lines: [line] });
     }
-    if (lines.every((l) => /^\s*\d+[.)]\s+/.test(l))) {
-      return `<ol>${lines.map((l) => `<li>${inline(l.replace(/^\s*\d+[.)]\s+/, ''))}</li>`).join('')}</ol>`;
-    }
-    return `<p>${lines.map(inline).join('<br>')}</p>`;
+    return runs.map((run, i) => {
+      const tight = i < runs.length - 1 ? ' class="is-tight"' : '';
+      if (run.kind === 'h') return `<h4${tight}>${inline(run.lines[0].match(HEADING)[1])}</h4>`;
+      if (run.kind === 'ul') return `<ul${tight}>${run.lines.map((l) => `<li>${inline(l.replace(BULLET, ''))}</li>`).join('')}</ul>`;
+      if (run.kind === 'ol') return `<ol${tight}>${run.lines.map((l) => `<li>${inline(l.replace(NUMBERED, ''))}</li>`).join('')}</ol>`;
+      return `<p${tight}>${run.lines.map(inline).join('<br>')}</p>`;
+    }).join('');
   }
 
   // ---- Math (KaTeX, loaded with the chat window) ---------------------------------

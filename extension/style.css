@@ -2060,7 +2060,22 @@ body.chat-dragging .chat-header {
 .chat-md ul,
 .chat-md ol,
 .chat-md pre {
-  margin: 0 0 8px;
+  /* Paragraph spacing, clearly larger than the line spacing (as in the
+     terminal, where blocks are a blank line apart). */
+  margin: 0 0 14px;
+}
+
+/* Lines of one block (a label and the list under it) stay together. */
+.chat-md .is-tight {
+  margin-bottom: 4px;
+}
+
+.chat-md li + li {
+  margin-top: 3px;
+}
+
+.chat-md > :first-child {
+  margin-top: 0;
 }
 
 .chat-md > :last-child {
@@ -2073,7 +2088,7 @@ body.chat-dragging .chat-header {
 }
 
 .chat-md h4 {
-  margin: 4px 0 6px;
+  margin: 20px 0 6px;
   font-size: 14px;
   font-weight: 600;
 }
@@ -2110,7 +2125,7 @@ body.chat-dragging .chat-header {
 }
 
 .chat-md .katex-display {
-  margin: 4px 0 8px;
+  margin: 4px 0 14px;
   padding: 2px 0;
   overflow-x: auto;
   overflow-y: hidden;
@@ -2118,7 +2133,7 @@ body.chat-dragging .chat-header {
 
 /* Wide tables scroll sideways inside the message. */
 .chat-table {
-  margin: 0 0 8px;
+  margin: 0 0 14px;
   overflow-x: auto;
 }
 
