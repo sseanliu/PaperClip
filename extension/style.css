@@ -2384,19 +2384,19 @@ body.chat-dragging .chat-header {
   border-color: color-mix(in srgb, var(--warm-gray), var(--ink) 18%);
 }
 
+/* Stop, shown only while Claude answers (Enter sends). */
 .chat-send {
   padding: 8px 16px;
   border: none;
   border-radius: 10px;
-  background: var(--ink);
-  color: var(--paper);
+  background: var(--warm-gray);
+  color: var(--ink);
   font: inherit;
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
 }
 
-.chat-send.is-stop {
-  background: var(--warm-gray);
-  color: var(--ink);
+.chat-send[hidden] {
+  display: none;
 }

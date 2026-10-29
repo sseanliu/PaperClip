@@ -198,7 +198,7 @@
       <div class="chat-attachments" id="chatAttachments" hidden></div>
       <div class="chat-compose">
         <textarea class="chat-input" id="chatInput" rows="1" placeholder="Ask about this paper…"></textarea>
-        <button class="chat-send" data-chat-action="send" title="Send (Enter)">Send</button>
+        <button class="chat-send" data-chat-action="send" title="Stop the answer" hidden>Stop</button>
       </div>
       ${RESIZE_EDGES.map((edge) => `<div class="chat-resize is-${edge}" data-edge="${edge}"></div>`).join('')}
     `;
@@ -545,10 +545,9 @@
 
   function setBusy(value) {
     busy = value;
+    // Enter sends; the button only appears, as Stop, while Claude answers.
     if (sendBtn) {
-      sendBtn.textContent = busy ? 'Stop' : 'Send';
-      sendBtn.title = busy ? 'Stop the answer' : 'Send (Enter)';
-      sendBtn.classList.toggle('is-stop', busy);
+      sendBtn.hidden = !busy;
     }
   }
 
