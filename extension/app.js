@@ -1085,16 +1085,7 @@ document.addEventListener('click', async (e) => {
   // Click on the title text: open the paper (jump to existing tab or open
   // a new one). Click anywhere else on the row: toggle expand.
   if (e.target.closest('.paper-title-text')) {
-    const tabId = row.dataset.tabId ? parseInt(row.dataset.tabId, 10) : null;
-    const windowId = row.dataset.windowId ? parseInt(row.dataset.windowId, 10) : null;
-    if (tabId) {
-      try {
-        await chrome.tabs.update(tabId, { active: true });
-        if (windowId) await chrome.windows.update(windowId, { focused: true });
-        return;
-      } catch {}
-    }
-    if (row.dataset.url) chrome.tabs.create({ url: row.dataset.url });
+    await openRowPaper(row);
     return;
   }
 
@@ -1393,6 +1384,148 @@ function initSettingsMenu() {
     }
   });
 }
+
+/** Jump to the paper's open tab, or open it in a new one. */
+async function openRowPaper(row) {
+  const tabId = row.dataset.tabId ? parseInt(row.dataset.tabId, 10) : null;
+  const windowId = row.dataset.windowId ? parseInt(row.dataset.windowId, 10) : null;
+  if (tabId) {
+    try {
+      await chrome.tabs.update(tabId, { active: true });
+      if (windowId) await chrome.windows.update(windowId, { focused: true });
+      return;
+    } catch {}
+  }
+  if (row.dataset.url) chrome.tabs.create({ url: row.dataset.url });
+}
+
+// ─── Right-click menu on a paper ─────────────────────────────────────────────
+//
+// Replaces the browser's context menu on rows and covers. When the paper is
+// part of a multi-selection, copy / star / delete apply to the whole
+// selection.
+
+let paperMenuEl = null;
+let paperMenuRow = null;
+
+const MENU_ICONS = {
+  open: '<path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/>',
+  preview: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+  star: '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
+  tag: '<path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><circle cx="7" cy="7" r="1.5"/>',
+  copy: '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  link: '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+  trash: '<path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="m19 6-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>',
+};
+
+function menuItem(action, icon, label, extraClass = '') {
+  return `<button class="paper-menu-item${extraClass}" data-menu-action="${action}">
+    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${MENU_ICONS[icon]}</svg>
+    <span>${escapeHtml(label)}</span>
+  </button>`;
+}
+
+async function openPaperMenu(row, x, y) {
+  if (!paperMenuEl) {
+    paperMenuEl = document.createElement('div');
+    paperMenuEl.className = 'paper-menu';
+    paperMenuEl.hidden = true;
+    document.body.appendChild(paperMenuEl);
+    // Clicks stay in the menu: the page's click handlers would otherwise
+    // clear the selection or close a popover the menu just opened.
+    paperMenuEl.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const item = e.target.closest('[data-menu-action]');
+      if (item) runPaperMenuAction(item.dataset.menuAction);
+    });
+  }
+  const id = row.dataset.id;
+  const paper = await PaperStore.get(id);
+  if (!paper) return;
+  paperMenuRow = row;
+  const many = selectedIds.has(id) && selectedIds.size > 1 ? selectedIds.size : 0;
+  const suffix = many ? ` (${many})` : '';
+  paperMenuEl.innerHTML = [
+    menuItem('open', 'open', row.dataset.tabId ? 'Go to open tab' : 'Open in new tab'),
+    menuItem('preview', 'preview', 'Preview in reader'),
+    '<div class="paper-menu-divider"></div>',
+    menuItem('star', 'star', (many ? 'Star' : paper.starred ? 'Unstar' : 'Star') + suffix),
+    menuItem('tag', 'tag', 'Add to tag…'),
+    '<div class="paper-menu-divider"></div>',
+    menuItem('copy', 'copy', 'Copy paper info' + suffix),
+    menuItem('copy-link', 'link', 'Copy link'),
+    '<div class="paper-menu-divider"></div>',
+    menuItem('delete', 'trash', 'Delete' + suffix, ' is-danger'),
+  ].join('');
+  paperMenuEl.hidden = false;
+  // Open at the pointer, flipped to stay on screen.
+  const w = paperMenuEl.offsetWidth;
+  const h = paperMenuEl.offsetHeight;
+  paperMenuEl.style.left = `${Math.max(8, x + w > innerWidth - 8 ? x - w : x)}px`;
+  paperMenuEl.style.top = `${Math.max(8, y + h > innerHeight - 8 ? y - h : y)}px`;
+}
+
+function closePaperMenu() {
+  if (paperMenuEl) paperMenuEl.hidden = true;
+  paperMenuRow = null;
+}
+
+async function runPaperMenuAction(action) {
+  const row = paperMenuRow;
+  closePaperMenu();
+  if (!row) return;
+  const id = row.dataset.id;
+  const many = selectedIds.has(id) && selectedIds.size > 1;
+  if (action === 'open') {
+    await openRowPaper(row);
+  } else if (action === 'preview') {
+    const paper = await PaperStore.get(id);
+    if (paper && window.PaperViewer) window.PaperViewer.open(paper, { focus: true });
+  } else if (action === 'star') {
+    if (many) {
+      for (const sid of selectedIds) await patchPaper(sid, (p) => { p.starred = true; });
+    } else {
+      await patchPaper(id, (p) => { p.starred = !p.starred; });
+    }
+  } else if (action === 'tag') {
+    await openTagPickerFor(row.querySelector('.paper-card-cover, .paper-star-btn') || row, id);
+  } else if (action === 'copy') {
+    if (many) {
+      await copySelectedToClipboard();
+    } else {
+      const paper = await PaperStore.get(id);
+      if (paper) await navigator.clipboard.writeText(formatPaperForCopy(paper));
+    }
+  } else if (action === 'copy-link') {
+    if (row.dataset.url) await navigator.clipboard.writeText(row.dataset.url);
+  } else if (action === 'delete') {
+    if (many) await deleteSelected();
+    else await deletePaper(id);
+  }
+}
+
+document.addEventListener('contextmenu', (e) => {
+  const row = e.target.closest && e.target.closest('#paperList .paper-row');
+  if (!row || !row.dataset.id) {
+    closePaperMenu();
+    return;
+  }
+  e.preventDefault();
+  openPaperMenu(row, e.clientX, e.clientY);
+});
+
+document.addEventListener('pointerdown', (e) => {
+  if (paperMenuEl && !paperMenuEl.hidden && !paperMenuEl.contains(e.target)) closePaperMenu();
+}, true);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && paperMenuEl && !paperMenuEl.hidden) {
+    e.stopImmediatePropagation();
+    closePaperMenu();
+  }
+}, true);
+addEventListener('scroll', closePaperMenu, { passive: true, capture: true });
+addEventListener('resize', closePaperMenu);
+addEventListener('blur', closePaperMenu);
 
 // ─── Tag picker popover ──────────────────────────────────────────────────────
 
