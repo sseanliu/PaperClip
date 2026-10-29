@@ -10,7 +10,8 @@
  * Exposes window.PaperViewer = { open(paper, { focus }), close(), isOpen(),
  * isOpenFor(id), current() } for app.js (a non-module script) to call, and
  * fires a `paperviewer:change` event on document whenever the open paper
- * changes (detail { paper, pdfUrl }, or null once closed).
+ * changes (detail { paper, pdfUrl, focus }, or null once closed; focus is
+ * true when the user opened it, false for a keyboard preview).
  */
 
 import * as pdfjsLib from './vendor/pdf.min.mjs';
@@ -149,7 +150,7 @@ async function open(paper, { focus = false } = {}) {
   currentPaperId = paper.id;
   currentPaper = paper;
   currentUrl = url || paper.url || null;
-  document.dispatchEvent(new CustomEvent('paperviewer:change', { detail: { paper, pdfUrl: url } }));
+  document.dispatchEvent(new CustomEvent('paperviewer:change', { detail: { paper, pdfUrl: url, focus } }));
 
   titleEl.textContent = paper.title || paper.url || 'Untitled';
   titleEl.title = titleEl.textContent;

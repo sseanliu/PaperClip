@@ -886,5 +886,9 @@
       paper = null;
       if (isShown()) show();
     }
+    // A paper opened by click comes with the chat open. Not for keyboard
+    // previews from the search results: those would take focus from the
+    // search field and start a session for every paper passed over.
+    if (detail.focus && !isShown()) show();
   });
 })();
