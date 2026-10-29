@@ -276,7 +276,23 @@ function useAutoHideToolbar() {
   return { shown, onMouseMove, toolbarHandlers };
 }
 
+// Pages follow the system appearance, like the rest of PaperClip. Lector's
+// dark scheme recolors at render time: lightness flipped onto this palette,
+// hue kept (charts keep their colors), image pixels untouched.
+const DARK_QUERY = window.matchMedia("(prefers-color-scheme: dark)");
+const DARK_PAGE_COLORS = { background: "#1f1c19", foreground: "#ebe5dc" }; // --card-bg, --ink (dark)
+
+function subscribeScheme(onChange) {
+  DARK_QUERY.addEventListener("change", onChange);
+  return () => DARK_QUERY.removeEventListener("change", onChange);
+}
+
+function useSystemScheme() {
+  return useSyncExternalStore(subscribeScheme, () => (DARK_QUERY.matches ? "dark" : "light"));
+}
+
 function Viewer({ url, onError, pageWidth = 1000, title, onClose, onOpenTab }) {
+  const scheme = useSystemScheme();
   const [showThumbs, setShowThumbs] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const toolbar = useAutoHideToolbar();
@@ -284,6 +300,8 @@ function Viewer({ url, onError, pageWidth = 1000, title, onClose, onOpenTab }) {
     <Root
       source={url}
       zoom={pageWidth / 612}
+      colorScheme={scheme}
+      darkModeColors={DARK_PAGE_COLORS}
       id="lectorRoot"
       tabIndex={-1}
       className="lector-root"
