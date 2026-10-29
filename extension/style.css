@@ -2115,9 +2115,10 @@ body.pdf-panel-open {
   color: var(--accent-amber);
 }
 
-/* KaTeX: a touch larger than the text; wide display math scrolls. */
+/* KaTeX: 1.2x the earlier 1.08em, so formulas read clearly next to the
+   text; wide display math scrolls. */
 .chat-md .katex {
-  font-size: 1.08em;
+  font-size: 1.3em;
 }
 
 .chat-md .katex-display {
