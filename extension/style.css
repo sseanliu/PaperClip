@@ -16,7 +16,6 @@
   --detail-bg: rgba(232, 226, 218, 0.18);
   --page-shadow: rgba(26, 22, 19, 0.12);
   --popover-shadow: rgba(26, 22, 19, 0.18);
-  --eq-shadow: rgba(26, 22, 19, 0.35);
   --on-accent: #fffdf9;
   --bar-bg: #1a1613;
   --bar-fg: #f8f5f0;
@@ -44,7 +43,6 @@
     --detail-bg: rgba(255, 253, 249, 0.025);
     --page-shadow: rgba(0, 0, 0, 0.5);
     --popover-shadow: rgba(0, 0, 0, 0.55);
-    --eq-shadow: rgba(0, 0, 0, 0.9);
     --bar-bg: #2b2723;
     --bar-fg: #ebe5dc;
     --bar-fg-quiet: rgba(235, 229, 220, 0.65);
@@ -1713,9 +1711,9 @@ body.pdf-panel-open {
   background: rgba(90, 122, 98, 0.22);
 }
 
-/* Display equations (panel/main.jsx EquationLayer): nothing shows until the
-   pointer is on one, then a soft shadow settles under the formula; a click
-   hands it to the Claude chat. */
+/* Display equations (panel/main.jsx EquationLayer): nothing shows; the
+   pointer turns into a hand over one, and a click hands it to the Claude
+   chat. */
 .lector-eq-layer {
   position: absolute;
   inset: 0;
@@ -1726,14 +1724,8 @@ body.pdf-panel-open {
 
 .lector-eq {
   position: absolute;
-  border-radius: 6px;
   cursor: pointer;
   pointer-events: auto;
-  transition: box-shadow 0.18s ease-out;
-}
-
-.lector-eq:hover {
-  box-shadow: 0 6px 10px -4px var(--eq-shadow);
 }
 
 /* ---- Lector full viewer chrome ---- */

@@ -245,8 +245,8 @@ async function equationImage(pageProxy, q) {
   return canvas.toDataURL("image/png");
 }
 
-// Equations on one page: invisible until hovered (a soft shadow under the
-// formula); a click hands the equation to the chat (chat.js listens for
+// Equations on one page: invisible (the pointer turns into a hand over one);
+// a click hands the equation to the chat (chat.js listens for
 // paperclip:equation).
 function EquationLayer({ pageNumber }) {
   const getPdfPageProxy = usePdf((s) => s.getPdfPageProxy);
