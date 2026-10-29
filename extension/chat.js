@@ -44,20 +44,54 @@
       .replace(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
   }
 
+  // GitHub-style tables: a header row, a |---|:---:| separator, then rows.
+  const TABLE_ROW = /^\s*\|.*\|\s*$/;
+  const TABLE_SEPARATOR = /^\s*\|(\s*:?-{3,}:?\s*\|)+\s*$/;
+
+  function cells(line) {
+    return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
+  }
+
+  function tableHtml(lines) {
+    const align = cells(lines[1]).map((c) => (c.startsWith(':') && c.endsWith(':') ? 'center' : c.endsWith(':') ? 'right' : ''));
+    const row = (line, tag) => `<tr>${cells(line).map((c, i) => `<${tag}${align[i] ? ` style="text-align:${align[i]}"` : ''}>${inline(c)}</${tag}>`).join('')}</tr>`;
+    return `<div class="chat-table"><table><thead>${row(lines[0], 'th')}</thead>`
+      + `<tbody>${lines.slice(2).map((l) => row(l, 'td')).join('')}</tbody></table></div>`;
+  }
+
+  /** A block's lines with any tables in it split out (text right above a table needs no blank line). */
+  function withTables(lines) {
+    for (let i = 0; i + 1 < lines.length; i++) {
+      if (TABLE_ROW.test(lines[i]) && TABLE_SEPARATOR.test(lines[i + 1])) {
+        let end = i + 2;
+        while (end < lines.length && TABLE_ROW.test(lines[end])) end++;
+        return [
+          i ? blockHtml(lines.slice(0, i)) : '',
+          tableHtml(lines.slice(i, end)),
+          end < lines.length ? withTables(lines.slice(end)) : '',
+        ].join('');
+      }
+    }
+    return blockHtml(lines);
+  }
+
   function textBlocks(text) {
     return text.split(/\n{2,}/).map((block) => {
       const lines = block.split('\n').filter((l) => l.trim());
-      if (!lines.length) return '';
-      const heading = lines.length === 1 && lines[0].match(/^#{1,4}\s+(.*)$/);
-      if (heading) return `<h4>${inline(heading[1])}</h4>`;
-      if (lines.every((l) => /^\s*[-*]\s+/.test(l))) {
-        return `<ul>${lines.map((l) => `<li>${inline(l.replace(/^\s*[-*]\s+/, ''))}</li>`).join('')}</ul>`;
-      }
-      if (lines.every((l) => /^\s*\d+[.)]\s+/.test(l))) {
-        return `<ol>${lines.map((l) => `<li>${inline(l.replace(/^\s*\d+[.)]\s+/, ''))}</li>`).join('')}</ol>`;
-      }
-      return `<p>${lines.map(inline).join('<br>')}</p>`;
+      return lines.length ? withTables(lines) : '';
     }).join('');
+  }
+
+  function blockHtml(lines) {
+    const heading = lines.length === 1 && lines[0].match(/^#{1,4}\s+(.*)$/);
+    if (heading) return `<h4>${inline(heading[1])}</h4>`;
+    if (lines.every((l) => /^\s*[-*]\s+/.test(l))) {
+      return `<ul>${lines.map((l) => `<li>${inline(l.replace(/^\s*[-*]\s+/, ''))}</li>`).join('')}</ul>`;
+    }
+    if (lines.every((l) => /^\s*\d+[.)]\s+/.test(l))) {
+      return `<ol>${lines.map((l) => `<li>${inline(l.replace(/^\s*\d+[.)]\s+/, ''))}</li>`).join('')}</ol>`;
+    }
+    return `<p>${lines.map(inline).join('<br>')}</p>`;
   }
 
   function markdown(src) {

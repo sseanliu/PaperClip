@@ -2052,6 +2052,31 @@ body.chat-dragging .chat-header {
   color: var(--accent-amber);
 }
 
+/* Wide tables scroll sideways inside the message. */
+.chat-table {
+  margin: 0 0 8px;
+  overflow-x: auto;
+}
+
+.chat-table table {
+  border-collapse: collapse;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.chat-table th,
+.chat-table td {
+  padding: 5px 12px;
+  border: 1px solid var(--warm-gray);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.chat-table th {
+  font-weight: 600;
+  background: var(--paper);
+}
+
 .chat-tool,
 .chat-thinking {
   font-size: 12px;
