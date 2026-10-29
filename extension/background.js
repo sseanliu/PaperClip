@@ -583,12 +583,28 @@ async function requeueIeeeOnce() {
   await chrome.storage.local.set({ ieeeRequeued: true });
 }
 
+/**
+ * One time: NeurIPS entries were all 'unsupported' before enrichNeurips;
+ * fetch their metadata now, which also merges each with its arXiv preprint.
+ */
+async function requeueNeuripsOnce() {
+  const { neuripsRequeued } = await chrome.storage.local.get('neuripsRequeued');
+  if (neuripsRequeued) return;
+  await PaperStore.edit((papers) => {
+    for (const p of Object.values(papers)) {
+      if (p.source === 'nips' && p.enrichmentStatus === 'unsupported') p.enrichmentStatus = 'pending';
+    }
+  });
+  await chrome.storage.local.set({ neuripsRequeued: true });
+}
+
 chrome.runtime.onInstalled.addListener(async () => {
   updateBadge();
   await backfillExistingTabs();
   await reclassifyGenericPdfs();
   await cleanupJunkTitles();
   await requeueIeeeOnce();
+  await requeueNeuripsOnce();
   retryStuckEnrichments();
 });
 

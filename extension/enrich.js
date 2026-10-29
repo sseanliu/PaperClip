@@ -242,6 +242,76 @@
     return out;
   }
 
+  // ─── NeurIPS proceedings ───────────────────────────────────────────────────
+  //
+  // The abstract page carries citation_* meta tags (title, authors) and the
+  // abstract. S2 doesn't resolve these URLs, so the arXiv ID / DOI that lets
+  // the camera-ready entry merge with its arXiv preprint come from an S2
+  // title match, as for CVF.
+
+  // .../<year>/hash/<hash>-Abstract-<Track>.html, also from the PDF link
+  // .../<year>/file/<hash>-Paper-<Track>.pdf.
+  function neuripsAbstractUrl(url) {
+    const m = (url || '').match(/^(https?:\/\/(?:proceedings\.neurips\.cc|papers\.nips\.cc)\/paper(?:_files)?\/paper\/\d{4})\/(?:hash|file)\/([0-9a-f]{32})-(?:Abstract|Paper)((?:-[\w]+)?)\.(?:html|pdf)/i);
+    return m ? `${m[1]}/hash/${m[2]}-Abstract${m[3]}.html` : null;
+  }
+
+  function metaContents(html, name) {
+    const re = new RegExp(`<meta\\s+name="${name}"\\s+content="([^"]*)"`, 'gi');
+    return [...html.matchAll(re)].map((m) => cleanWhitespace(decodeXml(m[1])));
+  }
+
+  async function enrichNeurips(paper) {
+    const page = neuripsAbstractUrl(paper.url);
+    if (!page) return null;
+    const r = await fetch(page);
+    if (r.status === 404) return null;
+    if (!r.ok) throw new Error(`neurips: HTTP ${r.status}`);
+    const html = await r.text();
+    const title = metaContents(html, 'citation_title')[0];
+    if (!title) return null;
+
+    const year = parseInt((paper.sourceId || '').split('/')[0], 10) || null;
+    const out = {
+      title,
+      // "Bolya, Daniel" -> "Daniel Bolya"
+      authors: metaContents(html, 'citation_author').map((a) => a.split(/,\s*/).reverse().join(' ')),
+      year,
+      venue: year ? `NeurIPS ${year}` : 'NeurIPS',
+    };
+    const abs = html.match(/<p class="paper-abstract">([\s\S]*?)<\/p>\s*<\/div>/i)
+      || html.match(/<p class="paper-abstract">([\s\S]*?)<\/p>/i);
+    if (abs) out.abstract = cleanWhitespace(decodeXml(abs[1].replace(/<[^>]+>/g, ' '))) || undefined;
+
+    // The arXiv ID is the point (it merges the preprint), so a rate-limited
+    // S2 is an error to retry later, not a finished lookup without IDs. A
+    // 404 or no match (paper not on S2) is a finished lookup.
+    const q = `https://api.semanticscholar.org/graph/v1/paper/search/match?query=${encodeURIComponent(title)}&fields=title,abstract,externalIds`;
+    const s2 = await fetchS2WithRetry(q);
+    if (s2.ok) {
+      const json = await s2.json();
+      const hit = json && json.data && json.data[0];
+      if (hit && normalizedTitle(hit.title) === normalizedTitle(title)) {
+        if (hit.externalIds) out.externalIds = hit.externalIds;
+        if (!out.abstract && hit.abstract) out.abstract = cleanWhitespace(hit.abstract);
+      }
+    } else if (s2.status !== 404) {
+      throw new Error(`neurips S2 match: HTTP ${s2.status}`);
+    }
+    return out;
+  }
+
+  // S2's keyless API answers 429 to bursts; wait and try again a few times.
+  async function fetchS2WithRetry(url) {
+    let r;
+    for (let i = 0; i < 4; i++) {
+      r = await fetch(url);
+      if (r.status !== 429) return r;
+      await new Promise((done) => setTimeout(done, 1500 * 2 ** i));
+    }
+    return r;
+  }
+
   // ─── Semantic Scholar (universal — provides venue + cross-source IDs) ─────
   //
   // Returns externalIds like { DOI, ArXiv, ACL, MAG, ... } so the same paper
@@ -252,8 +322,9 @@
     if (paper.doi) return `DOI:${paper.doi}`;
     if (paper.source === 'semanticscholar' && paper.sourceId) return paper.sourceId;
     // S2 doesn't resolve Xplore URLs; the request only errors and turns the
-    // entry into a retried failure instead of 'unsupported'.
-    if (paper.url && paper.source !== 'ieee') return `URL:${paper.url}`;
+    // entry into a retried failure instead of 'unsupported'. Nor NeurIPS
+    // proceedings, whose lookup (enrichNeurips) already asked S2.
+    if (paper.url && paper.source !== 'ieee' && paper.source !== 'nips') return `URL:${paper.url}`;
     return null;
   }
 
@@ -329,6 +400,9 @@
           break;
         case 'ieee':
           primary = await enrichIeee(paper);
+          break;
+        case 'nips':
+          primary = await enrichNeurips(paper);
           break;
         case 'biorxiv':
         case 'medrxiv':
