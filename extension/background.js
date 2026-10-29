@@ -185,8 +185,10 @@ async function capturePaper(tab, mode = 'visit') {
   if (tab.id != null) lastCapturedByTab.set(tab.id, cls.canonicalId);
   if (!didMutate) return;
 
-  const paper = existing || created;
-  await PaperStore.put(paper);
+  await PaperStore.put(existing || created);
+  // A new entry or a new title may reveal the same paper under another id.
+  const paper = await PaperStore.get(await mergeDuplicatesOf((existing || created).id));
+  if (!paper) return;
 
   // Kick off metadata enrichment for new entries. A failed entry retries on
   // its backoff schedule, or right away when the user opens the paper again.
@@ -394,7 +396,7 @@ async function runEnrichmentOnce(canonicalId, force = false) {
     // whether any other entry in the library is the same paper under a
     // different canonical ID — same paper visited via arxiv URL and via the
     // CHI portal, for example. If so, merge them.
-    dedupeAcrossExternalIds(papers, canonicalId);
+    mergeDuplicates(papers, canonicalId);
   });
 }
 
@@ -436,14 +438,42 @@ function externalIdSet(paper) {
   return ids;
 }
 
+/**
+ * A paper's title as a match key, or null when it can't name one paper:
+ * under 5 words (a file name, "IEEE Xplore Full-Text PDF:"), a stand-in, or
+ * an error page. Case, punctuation and accents don't count.
+ */
+function titleKey(p) {
+  const t = (p.title || '').trim();
+  if (t.split(/\s+/).length < 5) return null;
+  if (isPlaceholderTitle(t, p.source, p.sourceId) || looksLikeErrorPage(t)) return null;
+  return t.normalize('NFKD').toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+// Family name of the first author ("Daniel Bolya", "Bolya, Daniel"), or null.
+function firstAuthorKey(p) {
+  const a = Array.isArray(p.authors) && typeof p.authors[0] === 'string' ? p.authors[0].trim() : '';
+  if (!a) return null;
+  const family = a.includes(',') ? a.split(',')[0] : a.split(/\s+/).pop();
+  return family.normalize('NFKD').toLowerCase().replace(/[^a-z]+/g, '') || null;
+}
+
+/**
+ * The same paper under two entries: a shared arXiv ID or DOI, or (when a
+ * source gave no IDs: OpenReview blocks scripts, ACM records lack arXiv IDs)
+ * the same long title, with the same first author when both list authors.
+ */
 function papersAreDuplicates(a, b) {
   if (a.id === b.id) return false;
   const aIds = externalIdSet(a);
-  if (aIds.size === 0) return false;
   for (const id of externalIdSet(b)) {
     if (aIds.has(id)) return true;
   }
-  return false;
+  const t = titleKey(a);
+  if (!t || t !== titleKey(b)) return false;
+  const fa = firstAuthorKey(a);
+  const fb = firstAuthorKey(b);
+  return !fa || !fb || fa === fb;
 }
 
 function mergePapers(primary, secondary) {
@@ -478,16 +508,20 @@ function mergePapers(primary, secondary) {
   if (secondary.readStatus === 'read') primary.readStatus = 'read';
 }
 
-function dedupeAcrossExternalIds(papers, paperId) {
+/**
+ * Merge every entry that is the same paper as papers[paperId] into one.
+ * Returns the id that survives (paperId when nothing matched).
+ */
+function mergeDuplicates(papers, paperId) {
   const target = papers[paperId];
-  if (!target) return false;
+  if (!target) return paperId;
 
   const matches = [];
   for (const p of Object.values(papers)) {
     if (p.id === paperId) continue;
     if (papersAreDuplicates(target, p)) matches.push(p);
   }
-  if (matches.length === 0) return false;
+  if (matches.length === 0) return paperId;
 
   // Pick primary as the entry with the earliest firstSeenAt — keeps the
   // user's library order stable.
@@ -499,7 +533,45 @@ function dedupeAcrossExternalIds(papers, paperId) {
     mergePapers(primary, s);
     delete papers[s.id];
   }
-  return true;
+  return primary.id;
+}
+
+/**
+ * After a capture: merge the entry with its twins, if it has any (a cheap
+ * scan first, so the common no-duplicate case writes nothing). Returns the
+ * id that survives.
+ */
+async function mergeDuplicatesOf(paperId) {
+  const all = await PaperStore.all();
+  const target = all.get(paperId);
+  if (!target) return paperId;
+  let any = false;
+  for (const p of all.values()) {
+    if (papersAreDuplicates(target, p)) { any = true; break; }
+  }
+  if (!any) return paperId;
+  return PaperStore.edit((papers) => mergeDuplicates(papers, paperId));
+}
+
+/**
+ * Merge every set of duplicates in the library (install and startup): only
+ * entries sharing a title key or an external ID with another entry are
+ * checked, so the pass stays linear.
+ */
+async function mergeAllDuplicates() {
+  await PaperStore.edit((papers) => {
+    const seen = new Map();
+    const keysOf = (p) => [...externalIdSet(p), titleKey(p) && `title:${titleKey(p)}`].filter(Boolean);
+    for (const p of Object.values(papers)) {
+      for (const k of keysOf(p)) seen.set(k, (seen.get(k) || 0) + 1);
+    }
+    const ordered = Object.values(papers)
+      .filter((p) => keysOf(p).some((k) => seen.get(k) > 1))
+      .sort((a, b) => (a.firstSeenAt || '').localeCompare(b.firstSeenAt || ''));
+    for (const p of ordered) {
+      if (papers[p.id]) mergeDuplicates(papers, p.id);
+    }
+  });
 }
 
 /**
@@ -523,7 +595,9 @@ async function reclassifyGenericPdfs() {
       // for every PDF link, "<year>/file"; now "<year>/<hash>".
       if ((p.source !== 'pdf' && p.source !== 'nips') || !p.url) continue;
       const cls = classifyPaper(p.url);
-      if (!cls || cls.source === 'pdf' || cls.canonicalId === p.id) continue;
+      // A generic PDF stays one, but its id can still change (query
+      // parameters that don't pick the file are dropped now).
+      if (!cls || cls.canonicalId === p.id) continue;
 
       // "NeurIPS:2025/file" and the like name the old id, not the paper.
       if (isPlaceholderTitle(p.title, p.source, p.sourceId)) p.title = null;
@@ -605,6 +679,7 @@ chrome.runtime.onInstalled.addListener(async () => {
   await cleanupJunkTitles();
   await requeueIeeeOnce();
   await requeueNeuripsOnce();
+  await mergeAllDuplicates();
   retryStuckEnrichments();
 });
 
@@ -613,6 +688,7 @@ chrome.runtime.onStartup.addListener(async () => {
   await backfillExistingTabs();
   await reclassifyGenericPdfs();
   await cleanupJunkTitles();
+  await mergeAllDuplicates();
   retryStuckEnrichments();
 });
 

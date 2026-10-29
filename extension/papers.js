@@ -37,6 +37,9 @@
     return rawUrl.slice(READER_PAGE.length + 1) || null;
   }
 
+  const IGNORED_PARAMS = new Set(['fbclid', 'gclid', 'mc_cid', 'mc_eid']);
+  const DROPBOX_IGNORED_PARAMS = new Set(['e', 'dl', 'st', 'raw', 'download', 'from_auth', 'from_previews_auto_save']);
+
   function classifyPaper(rawUrl) {
     // The server said it's a PDF, so a reader URL is a paper even without
     // ".pdf" in its path.
@@ -175,8 +178,18 @@
 
     // ── Generic PDF (fallback for any URL ending in .pdf) ──────────────────
     if (wrapped || /\.pdf$/i.test(path)) {
-      // Normalize URL: drop fragment, keep query (some servers need it)
-      const norm = `${u.protocol}//${host}${path}${u.search || ''}`;
+      // Normalize URL: drop fragment, keep query (some servers need it) but
+      // not the parameters that don't pick the file, or one PDF becomes
+      // several entries (Dropbox's e=2 / e=3, tracking tags).
+      // The query is rebuilt only when something was dropped, so other ids
+      // (and the thumbnails stored under them) keep their exact spelling.
+      const params = new URLSearchParams(u.search);
+      const ignored = [...params.keys()].filter((key) =>
+        /^utm_/i.test(key) || IGNORED_PARAMS.has(key.toLowerCase())
+        || (host === 'dropbox.com' && DROPBOX_IGNORED_PARAMS.has(key.toLowerCase())));
+      ignored.forEach((key) => params.delete(key));
+      const query = ignored.length ? (params.toString() ? `?${params}` : '') : (u.search || '');
+      const norm = `${u.protocol}//${host}${path}${query}`;
       return { source: 'pdf', sourceId: null, canonicalId: `url:${norm}` };
     }
 
