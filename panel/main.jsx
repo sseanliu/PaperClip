@@ -291,14 +291,14 @@ function useSystemScheme() {
   return useSyncExternalStore(subscribeScheme, () => (DARK_QUERY.matches ? "dark" : "light"));
 }
 
-function Viewer({ url, onError, pageWidth = 1000, title, onClose, onOpenTab }) {
+function Viewer({ source, onError, onLoad, pageWidth = 1000, title, onClose, onOpenTab }) {
   const scheme = useSystemScheme();
   const [showThumbs, setShowThumbs] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
   const toolbar = useAutoHideToolbar();
   return (
     <Root
-      source={url}
+      source={source}
       zoom={pageWidth / 612}
       colorScheme={scheme}
       darkModeColors={DARK_PAGE_COLORS}
@@ -308,6 +308,7 @@ function Viewer({ url, onError, pageWidth = 1000, title, onClose, onOpenTab }) {
       onError={onError}
       onDocumentLoad={({ proxy }) => {
         proxy.getPage(1).then(patchTextContentFonts).catch(() => {});
+        onLoad?.(proxy);
       }}
       loader={<div className="lector-loading">Loading PDF…</div>}
     >
@@ -423,14 +424,16 @@ function Viewer({ url, onError, pageWidth = 1000, title, onClose, onOpenTab }) {
 const roots = new WeakMap();
 
 window.LectorPanel = {
-  mount(container, url, { onError, pageWidth, title, onClose, onOpenTab } = {}) {
+  // source: the PDF's URL, or its bytes (from the reader's cache).
+  mount(container, source, { onError, onLoad, pageWidth, title, onClose, onOpenTab } = {}) {
     this.unmount(container);
     const root = createRoot(container);
     roots.set(container, root);
     root.render(
       <Viewer
-        url={url}
+        source={source}
         onError={onError}
+        onLoad={onLoad}
         pageWidth={pageWidth}
         title={title}
         onClose={onClose}

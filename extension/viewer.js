@@ -16,6 +16,7 @@
 
 import * as pdfjsLib from './vendor/pdf.min.mjs';
 import { pdfUrlFor } from './thumbs.js';
+import { getCachedPdf, putCachedPdf } from './pdfcache.js';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = './vendor/pdf.worker.min.mjs';
 
@@ -173,6 +174,8 @@ async function open(paper, { focus = false } = {}) {
   // controlled, fit-to-width from first paint, real text selection. Falls
   // back to the iframe embed if it errors (e.g. cross-origin fetch refused).
   if (window.LectorPanel) {
+    // A paper opened before comes from the local cache, not the network.
+    const cached = await getCachedPdf(url);
     if (generation !== renderGeneration) return;
     bodyEl.innerHTML = '';
     bodyEl.classList.add('is-lector');
@@ -180,12 +183,19 @@ async function open(paper, { focus = false } = {}) {
     holder.className = 'lector-holder';
     bodyEl.appendChild(holder);
     lectorHolder = holder;
-    window.LectorPanel.mount(holder, url, {
+    window.LectorPanel.mount(holder, cached || url, {
       pageWidth: READING_WIDTH,
       // The Lector toolbar carries the title and window buttons; the panel
       // header is hidden in this mode.
       title: titleEl.textContent,
       onClose: close,
+      // Once the whole file has arrived, keep it for the next open.
+      onLoad: cached ? undefined : (proxy) => {
+        proxy.getDownloadInfo()
+          .then(() => proxy.getData())
+          .then((bytes) => putCachedPdf(url, bytes))
+          .catch(() => {});
+      },
       onOpenTab: () => { if (currentUrl) chrome.tabs.create({ url: currentUrl }); },
       onError: () => {
         if (generation !== renderGeneration) return;

@@ -18,6 +18,7 @@
  */
 
 import * as pdfjsLib from './vendor/pdf.min.mjs';
+import { hasCachedPdf, putCachedPdf } from './pdfcache.js';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = './vendor/pdf.worker.min.mjs';
 
@@ -314,7 +315,7 @@ async function renderFirstPage(pdfUrl) {
     timer = setTimeout(() => reject(new Error(`timed out after ${RENDER_TIMEOUT_MS / 1000}s`)), RENDER_TIMEOUT_MS);
   });
   try {
-    return await Promise.race([drawFirstPage(task), timeout]);
+    return await Promise.race([drawFirstPage(task, pdfUrl), timeout]);
   } finally {
     clearTimeout(timer);
     // Also aborts a download or render still in flight after a timeout.
@@ -322,7 +323,7 @@ async function renderFirstPage(pdfUrl) {
   }
 }
 
-async function drawFirstPage(task) {
+async function drawFirstPage(task, pdfUrl) {
   const doc = await task.promise;
   const page = await doc.getPage(1);
   const base = page.getViewport({ scale: 1 });
@@ -338,7 +339,25 @@ async function drawFirstPage(task) {
   await page.render({ canvasContext: ctx, viewport }).promise;
   const large = await new Promise(r => canvas.toBlob(r, 'image/webp', 0.8));
   const small = await shrink(canvas);
+  await keepWholePdf(doc, pdfUrl);
   return { large, small };
+}
+
+/**
+ * A server that ignores range requests has sent the whole file by now; keep
+ * it for the reader, so the paper's first open needn't download it again.
+ * Range-capable servers (arXiv) sent only the first page's parts: skip those
+ * rather than fetch the rest.
+ */
+async function keepWholePdf(doc, pdfUrl) {
+  try {
+    if (await hasCachedPdf(pdfUrl)) return;
+    const whole = await Promise.race([
+      doc.getDownloadInfo().then(() => true),
+      new Promise(r => setTimeout(() => r(false), 50)),
+    ]);
+    if (whole) await putCachedPdf(pdfUrl, await doc.getData(), { prefetched: true });
+  } catch {}
 }
 
 /**
