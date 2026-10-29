@@ -832,6 +832,52 @@
     if (stale.length) chrome.storage.local.remove(stale);
   });
 
+  // ---- Diagnostics (dictation input) -----------------------------------------------
+  //
+  // Dictation apps (Wispr Flow) insert text by pasting into the focused
+  // field; sometimes nothing arrives in the chat input. This keeps the last
+  // 300 focus / paste / input / Cmd+V events in chrome.storage.local
+  // (chatInputLog) so a failure can be traced afterwards. Local only.
+
+  const LOG_KEY = 'chatInputLog';
+  const LOG_MAX = 300;
+  let logBuffer = [];
+  let logTimer = 0;
+
+  function describe(el) {
+    if (!el || el === document) return 'document';
+    if (el === document.body) return 'body';
+    if (el.id) return `#${el.id}`;
+    const cls = typeof el.className === 'string' ? el.className.split(' ')[0] : '';
+    return `${el.tagName.toLowerCase()}${cls ? `.${cls}` : ''}`;
+  }
+
+  function logEvent(type, detail = {}) {
+    logBuffer.push({ t: new Date().toISOString(), type, chat: isShown(), active: describe(document.activeElement), ...detail });
+    if (logBuffer.length > LOG_MAX) logBuffer = logBuffer.slice(-LOG_MAX);
+    clearTimeout(logTimer);
+    logTimer = setTimeout(() => chrome.storage.local.set({ [LOG_KEY]: logBuffer }), 500);
+  }
+
+  chrome.storage.local.get(LOG_KEY).then((s) => {
+    if (Array.isArray(s[LOG_KEY])) logBuffer = [...s[LOG_KEY], ...logBuffer].slice(-LOG_MAX);
+  });
+  addEventListener('focusin', (e) => logEvent('focusin', { target: describe(e.target) }), true);
+  addEventListener('focusout', (e) => logEvent('focusout', { target: describe(e.target), to: describe(e.relatedTarget) }), true);
+  addEventListener('blur', (e) => { if (e.target === window) logEvent('window-blur'); }, true);
+  addEventListener('focus', (e) => { if (e.target === window) logEvent('window-focus'); }, true);
+  addEventListener('paste', (e) => {
+    const types = e.clipboardData ? [...e.clipboardData.types] : [];
+    logEvent('paste', { target: describe(e.target), types, chars: e.clipboardData ? e.clipboardData.getData('text/plain').length : -1 });
+    setTimeout(() => logEvent('paste-after', { prevented: e.defaultPrevented, inputChars: inputEl ? inputEl.value.length : -1 }), 0);
+  }, true);
+  addEventListener('keydown', (e) => {
+    if (e.metaKey && e.key.toLowerCase() === 'v') logEvent('cmd-v', { target: describe(e.target) });
+  }, true);
+  document.addEventListener('beforeinput', (e) => {
+    if (e.target === inputEl) logEvent('beforeinput', { inputType: e.inputType, chars: (e.data || '').length });
+  }, true);
+
   // ---- Triggers --------------------------------------------------------------------
 
   addEventListener('keydown', (e) => {
