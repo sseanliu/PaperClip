@@ -225,12 +225,19 @@
     });
 
     // Paste a screenshot into the input, or drop image files on the window.
+    // Text is inserted from the paste event's own clipboard snapshot rather
+    // than left to the browser: Chrome reads the system clipboard a second
+    // time to insert, and dictation apps (Wispr Flow) paste and then restore
+    // the previous clipboard right away, so that second read could come back
+    // empty and the dictated text never appeared.
     inputEl.addEventListener('paste', (e) => {
-      const files = [...(e.clipboardData ? e.clipboardData.files : [])].filter((f) => f.type.startsWith('image/'));
-      if (!files.length) return;
-      // Keep any text that came along; a bare image shouldn't paste a file name.
-      if (!e.clipboardData.types.includes('text/plain')) e.preventDefault();
+      if (!e.clipboardData) return;
+      const files = [...e.clipboardData.files].filter((f) => f.type.startsWith('image/'));
+      const text = e.clipboardData.getData('text/plain');
+      if (!files.length && !text) return;
+      e.preventDefault();
       files.forEach(addImage);
+      if (text) insertText(text);
     });
     win.addEventListener('dragover', (e) => {
       if (e.dataTransfer && [...e.dataTransfer.items].some((i) => i.kind === 'file' && i.type.startsWith('image/'))) e.preventDefault();
@@ -405,6 +412,16 @@
     header.addEventListener('pointermove', move);
     header.addEventListener('pointerup', end);
     header.addEventListener('pointercancel', end);
+  }
+
+  /** Types `text` at the caret (replacing a selection), keeping undo. */
+  function insertText(text) {
+    inputEl.focus();
+    if (!document.execCommand('insertText', false, text)) {
+      inputEl.setRangeText(text, inputEl.selectionStart, inputEl.selectionEnd, 'end');
+      inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    autosize();
   }
 
   function autosize() {
