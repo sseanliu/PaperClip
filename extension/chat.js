@@ -261,18 +261,16 @@
     header.addEventListener('pointerdown', startDrag);
     header.addEventListener('dblclick', (e) => {
       if (e.target.closest('button')) return;
-      win.classList.remove('is-placed');
-      win.style.left = '';
-      win.style.top = '';
+      placed = null;
       try { localStorage.removeItem(POSITION_KEY); } catch {}
+      position();
     });
     try {
-      const saved = JSON.parse(localStorage.getItem(POSITION_KEY) || 'null');
-      if (saved) placeAt(saved.left, saved.top);
+      placed = JSON.parse(localStorage.getItem(POSITION_KEY) || 'null');
     } catch {}
     addEventListener('resize', () => {
       if (win.style.width) setSize(parseFloat(win.style.width), parseFloat(win.style.height));
-      if (win.classList.contains('is-placed')) placeAt(parseFloat(win.style.left), parseFloat(win.style.top));
+      if (!win.hidden) position();
     });
 
     // Drag an edge or corner to resize (no smaller than the default size);
@@ -302,7 +300,7 @@
     win.style.width = '';
     win.style.height = '';
     try { localStorage.removeItem(SIZE_KEY); } catch {}
-    if (win.classList.contains('is-placed')) placeAt(parseFloat(win.style.left), parseFloat(win.style.top));
+    position();
   }
 
   function startResize(e) {
@@ -313,14 +311,7 @@
     const edge = handle.dataset.edge;
     const start = win.getBoundingClientRect();
     const min = defaultSize();
-    // Resizing from the left or top moves the window, so pin it at its
-    // current spot first (a centered window is positioned by a transform).
-    win.classList.add('is-placed');
-    win.style.left = `${start.left}px`;
-    win.style.top = `${start.top}px`;
     handle.setPointerCapture(e.pointerId);
-    document.body.classList.add('chat-resizing');
-    document.body.dataset.chatResize = edge;
     // Resizing has to re-lay out the content; at least do it once a frame.
     let pointer = null;
     let frame = 0;
@@ -331,8 +322,8 @@
       if (edge.includes('w')) left = Math.max(0, Math.min(right - min.width, pointer.x));
       if (edge.includes('s')) bottom = Math.min(innerHeight, Math.max(top + min.height, pointer.y));
       if (edge.includes('n')) top = Math.max(0, Math.min(bottom - min.height, pointer.y));
-      win.style.left = `${Math.round(left)}px`;
-      win.style.top = `${Math.round(top)}px`;
+      placed = { left: Math.round(left), top: Math.round(top) };
+      moveTo(placed);
       win.style.width = `${Math.round(right - left)}px`;
       win.style.height = `${Math.round(bottom - top)}px`;
     };
@@ -348,17 +339,25 @@
       handle.removeEventListener('pointermove', move);
       handle.removeEventListener('pointerup', end);
       handle.removeEventListener('pointercancel', end);
-      document.body.classList.remove('chat-resizing');
-      delete document.body.dataset.chatResize;
       try {
         localStorage.setItem(SIZE_KEY, JSON.stringify({ width: parseFloat(win.style.width), height: parseFloat(win.style.height) }));
-        localStorage.setItem(POSITION_KEY, JSON.stringify({ left: parseFloat(win.style.left), top: parseFloat(win.style.top) }));
+        if (placed) localStorage.setItem(POSITION_KEY, JSON.stringify(placed));
       } catch {}
     };
     handle.addEventListener('pointermove', move);
     handle.addEventListener('pointerup', end);
     handle.addEventListener('pointercancel', end);
   }
+
+  // ---- Position --------------------------------------------------------------------
+  //
+  // The window sits at left/top 0 and is placed only with `translate`, on its
+  // own compositor layer (will-change). Moving it, by drag or otherwise, is
+  // then a GPU offset: no layout, no repaint of the window or its shadow, and
+  // nothing else on the page restyled. Writing left/top re-laid out and
+  // repainted it on every move, which made dragging stutter.
+
+  let placed = null; // { left, top } once dragged; null = default spot
 
   /** (left, top) moved just enough to keep the window reachable. */
   function clampPosition(left, top, width) {
@@ -368,55 +367,44 @@
     };
   }
 
-  /** Moves the window so its top-left is at (left, top), keeping it reachable. */
-  function placeAt(left, top) {
-    const pos = clampPosition(left, top, win.offsetWidth || 680);
-    win.classList.add('is-placed');
-    win.style.left = `${pos.left}px`;
-    win.style.top = `${pos.top}px`;
+  function moveTo({ left, top }) {
+    win.style.translate = `${left}px ${top}px`;
   }
 
-  /**
-   * Header drag. While dragging, the window only gets a `translate` (moved
-   * by the compositor, no layout or repaint), updated at most once a frame;
-   * left/top are written once, on release. Writing left/top per pointer move
-   * re-laid out and repainted the window and its large shadow every time.
-   */
+  /** Puts the window at its dragged spot, or centered near the top. */
+  function position() {
+    const width = win.offsetWidth || 680;
+    moveTo(placed
+      ? clampPosition(placed.left, placed.top, width)
+      : { left: Math.round((innerWidth - width) / 2), top: Math.round(innerHeight * 0.12) });
+  }
+
+  /** Header drag: follows the pointer, applied at most once a frame. */
   function startDrag(e) {
     if (e.button !== 0 || e.target.closest('button')) return;
     e.preventDefault();
     const header = e.currentTarget;
     const rect = win.getBoundingClientRect();
-    // Pin a centered window at its current spot (same pixels, no jump).
-    placeAt(rect.left, rect.top);
-    const base = { left: parseFloat(win.style.left), top: parseFloat(win.style.top) };
     const dx = e.clientX - rect.left;
     const dy = e.clientY - rect.top;
-    let target = base;
+    let target = { left: Math.round(rect.left), top: Math.round(rect.top) };
     let frame = 0;
     header.setPointerCapture(e.pointerId);
-    document.body.classList.add('chat-dragging');
     win.classList.add('is-dragging');
     const move = (ev) => {
       target = clampPosition(ev.clientX - dx, ev.clientY - dy, rect.width);
-      if (frame) return;
-      frame = requestAnimationFrame(() => {
-        frame = 0;
-        win.style.translate = `${target.left - base.left}px ${target.top - base.top}px`;
-      });
+      if (!frame) frame = requestAnimationFrame(() => { frame = 0; moveTo(target); });
     };
     const end = () => {
       header.removeEventListener('pointermove', move);
       header.removeEventListener('pointerup', end);
       header.removeEventListener('pointercancel', end);
       cancelAnimationFrame(frame);
-      document.body.classList.remove('chat-dragging');
       win.classList.remove('is-dragging');
-      win.style.translate = '';
-      win.style.left = `${target.left}px`;
-      win.style.top = `${target.top}px`;
+      placed = target;
+      moveTo(placed);
       try {
-        localStorage.setItem(POSITION_KEY, JSON.stringify(target));
+        localStorage.setItem(POSITION_KEY, JSON.stringify(placed));
       } catch {}
     };
     header.addEventListener('pointermove', move);
@@ -444,6 +432,7 @@
     if (!win) build();
     loadKatex();
     win.hidden = false;
+    position();
     if (!paper || paper.id !== current.paper.id || !port) {
       connect({ id: current.paper.id, title: current.paper.title || current.paper.url || '', pdfUrl: current.pdfUrl });
     }

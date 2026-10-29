@@ -1860,12 +1860,13 @@ body.pdf-panel-open {
 
 /* ---- Claude Code chat over the reader (chat.js) ---- */
 .chat-window {
+  /* Placed by `translate` from chat.js (default spot: centered near the
+     top), on its own layer so moving it never repaints; the opening
+     animation uses `transform`, a separate property. */
   position: fixed;
-  top: 12vh;
-  left: 50%;
-  /* Centering uses `translate`, so the opening animation (transform) and a
-     drag (translate, chat.js) never fight over one property. */
-  translate: -50% 0;
+  top: 0;
+  left: 0;
+  will-change: translate;
   /* Above the reader (250) and the translation card (260). */
   z-index: 270;
   display: flex;
@@ -1891,21 +1892,6 @@ body.pdf-panel-open {
   to   { opacity: 1; transform: none; }
 }
 
-/* Dragged somewhere (chat.js sets left/top). */
-.chat-window.is-placed {
-  translate: none;
-}
-
-/* Its own compositor layer while dragging: moving it is then a GPU
-   translate, with no repaint of the window or its shadow. */
-.chat-window.is-dragging {
-  will-change: translate;
-}
-
-body.chat-dragging {
-  cursor: grabbing;
-  user-select: none;
-}
 
 /* Invisible resize handles on the window's edges and corners (chat.js). */
 .chat-resize {
@@ -1934,12 +1920,7 @@ body.chat-dragging {
 .chat-resize.is-nw { top: 0; left: 0; cursor: nwse-resize; }
 .chat-resize.is-se { bottom: 0; right: 0; cursor: nwse-resize; }
 
-/* While resizing, keep the edge's cursor and stop text selection. */
-body.chat-resizing { user-select: none; }
-body[data-chat-resize="n"], body[data-chat-resize="s"] { cursor: ns-resize; }
-body[data-chat-resize="e"], body[data-chat-resize="w"] { cursor: ew-resize; }
-body[data-chat-resize="ne"], body[data-chat-resize="sw"] { cursor: nesw-resize; }
-body[data-chat-resize="nw"], body[data-chat-resize="se"] { cursor: nwse-resize; }
+
 
 .chat-header {
   display: flex;
@@ -1951,7 +1932,7 @@ body[data-chat-resize="nw"], body[data-chat-resize="se"] { cursor: nwse-resize; 
   user-select: none;
 }
 
-body.chat-dragging .chat-header {
+.chat-window.is-dragging .chat-header {
   cursor: grabbing;
 }
 
