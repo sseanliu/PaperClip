@@ -852,6 +852,22 @@
       else show();
       return;
     }
+    // Tab switches the keyboard between the paper and the chat input while a
+    // paper is open (opening the chat if it was closed).
+    if (e.key === 'Tab' && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey
+        && window.PaperViewer && window.PaperViewer.isOpen()) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (isShown() && document.activeElement === inputEl) {
+        const root = document.getElementById('lectorRoot');
+        (root || document.getElementById('pdfPanelBody')).focus({ preventScroll: true });
+      } else if (isShown()) {
+        inputEl.focus();
+      } else {
+        show();
+      }
+      return;
+    }
     // Option+N starts a new chat while the chat is open. (Cmd+N can't be used:
     // Chrome keeps it for New Window and never delivers it to the page.)
     // e.code, since Option+N on a Mac is the dead key for "˜"; handling the
