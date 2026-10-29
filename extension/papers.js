@@ -107,11 +107,17 @@
 
     // ── NeurIPS proceedings ────────────────────────────────────────────────
     if (host === 'papers.nips.cc' || host === 'proceedings.neurips.cc') {
-      // /paper_files/paper/2024/hash/abc-Paper-Conference.pdf
-      // /paper/2023/hash/abc-Paper.pdf
-      // /paper/2023/hash/abc.html
+      // /paper_files/paper/2024/hash/<hash>-Abstract-Conference.html
+      // /paper_files/paper/2024/file/<hash>-Paper-Conference.pdf
+      // /paper/2023/hash/<hash>-Paper.pdf, /paper/2023/hash/<hash>.html
+      // The 32-hex hash names the paper; the abstract page and its PDF share it.
+      const h = path.match(/^\/paper(?:_files)?\/paper\/(\d{4})\/(?:hash|file)\/([0-9a-f]{32})\b/i);
+      if (h) {
+        const id = `${h[1]}/${h[2].toLowerCase()}`;
+        return { source: 'nips', sourceId: id, canonicalId: `nips:${id}` };
+      }
       const m = path.match(/^\/paper(?:_files)?\/paper\/(\d{4})\/(?:hash\/)?([\w\-]+)/i);
-      if (m) {
+      if (m && m[2] !== 'file') {
         const id = `${m[1]}/${m[2]}`;
         return { source: 'nips', sourceId: id, canonicalId: `nips:${id}` };
       }

@@ -514,10 +514,14 @@ function findInObject(papers, canonicalId) {
 async function reclassifyGenericPdfs() {
   await PaperStore.edit((papers) => {
     for (const p of Object.values(papers)) {
-      if (p.source !== 'pdf' || !p.url) continue;
+      // NeurIPS too: ids were once "<year>/<hash>-Abstract-Conference" or,
+      // for every PDF link, "<year>/file"; now "<year>/<hash>".
+      if ((p.source !== 'pdf' && p.source !== 'nips') || !p.url) continue;
       const cls = classifyPaper(p.url);
       if (!cls || cls.source === 'pdf' || cls.canonicalId === p.id) continue;
 
+      // "NeurIPS:2025/file" and the like name the old id, not the paper.
+      if (isPlaceholderTitle(p.title, p.source, p.sourceId)) p.title = null;
       delete papers[p.id];
       const existing = findInObject(papers, cls.canonicalId);
       if (existing) {
