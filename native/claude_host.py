@@ -17,6 +17,14 @@ Wire formats verified against CLI 2.1.312 (2026-10-28): the reply to a
 can_use_tool request is nested, {"type": "control_response", "response":
 {"subtype": "success", "request_id", "response": {"behavior", ...}}}.
 
+What Claude reads: an arXiv paper's LaTeX source, text files only (figures
+dropped), in ./source/ (fetched once; /read's copy in ~/Github/paper-src is
+linked instead when there is one); otherwise ./paper.txt from pdftotext. The
+note tells it to take the text from those and to Read the PDF's page only for
+an equation, figure or table. A paper whose chat hasn't been opened for 60
+days loses paper.pdf, paper.txt and source/ (prepared again on the next open);
+its folder and transcripts stay.
+
 Sessions are Claude Code's own transcripts: every paper has its own working
 directory, so ~/.claude/projects/<that directory, slugged>/*.jsonl holds all
 of its conversations. The chat's history list and the messages shown for a
@@ -52,6 +60,7 @@ Python 3.9 compatible: Chrome starts hosts with the system python3.
 """
 
 import base64
+import gzip
 import hashlib
 import itertools
 import json
@@ -62,7 +71,9 @@ import shutil
 import struct
 import subprocess
 import sys
+import tarfile
 import threading
+import time
 import traceback
 import urllib.request
 from pathlib import Path
@@ -75,6 +86,10 @@ IMAGE_CHUNK = 700_000  # base64 characters per history_image message
 LOG = Path("/tmp/paperclip-claude-host.log")
 # Chrome starts hosts with a minimal PATH; claude and the tools it runs live here.
 EXTRA_PATH = [str(HOME / ".local" / "bin"), "/opt/homebrew/bin", "/usr/local/bin"]
+PAPER_SRC = HOME / "Github" / "paper-src"  # /read's shelf of arXiv sources
+SOURCE_TEXT = {".tex", ".bib", ".bbl", ".bst", ".sty", ".cls", ".txt", ".md"}
+MAX_EPRINT_BYTES = 300 * 1024 * 1024
+KEEP_DAYS = 60
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36"
 
 out_lock = threading.Lock()
@@ -255,6 +270,155 @@ def download_pdf(url, dest):
     dest.write_bytes(data)
 
 
+def arxiv_id_of(paper_id, pdf_url):
+    if paper_id.startswith("arxiv:"):
+        return paper_id[len("arxiv:"):]
+    m = re.search(r"arxiv\.org/(?:abs|pdf)/(\d{4}\.\d{4,5})", pdf_url or "")
+    return m.group(1) if m else None
+
+
+def prepare_source(directory, arxiv_id):
+    """./source: the paper's LaTeX source, text files only. True when there."""
+    source = directory / "source"
+    if source.exists():
+        return True
+    if source.is_symlink():  # /read's copy was removed
+        source.unlink()
+    # /read keeps sources in ~/Github/paper-src/<id> or <id>-<slug>.
+    if PAPER_SRC.is_dir():
+        for shelf in sorted(PAPER_SRC.iterdir()):
+            if shelf.is_dir() and (shelf.name == arxiv_id or shelf.name.startswith(arxiv_id + "-")):
+                source.symlink_to(shelf)
+                return True
+    send({"type": "status", "text": "Fetching the paper's LaTeX source..."})
+    archive = directory / ".eprint"
+    staging = directory / ".source-new"
+    shutil.rmtree(staging, ignore_errors=True)
+    try:
+        req = urllib.request.Request(f"https://arxiv.org/e-print/{arxiv_id}", headers={"User-Agent": USER_AGENT})
+        with urllib.request.urlopen(req, timeout=60) as r, open(archive, "wb") as f:
+            size = 0
+            while True:
+                chunk = r.read(1 << 16)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > MAX_EPRINT_BYTES:
+                    raise ValueError("source archive too large")
+                f.write(chunk)
+        with open(archive, "rb") as f:
+            if f.read(4) == b"%PDF":
+                return False  # arXiv has only the PDF for this paper
+        try:
+            with tarfile.open(archive, "r:*") as tar:
+                for member in tar.getmembers():
+                    name = Path(member.name)
+                    if not member.isfile() or name.is_absolute() or ".." in name.parts:
+                        continue
+                    if name.suffix.lower() not in SOURCE_TEXT:
+                        continue
+                    dest = staging / name
+                    dest.parent.mkdir(parents=True, exist_ok=True)
+                    with tar.extractfile(member) as src, open(dest, "wb") as out:
+                        shutil.copyfileobj(src, out)
+        except tarfile.ReadError:
+            # A one-file paper comes as a gzipped .tex, not a tar.
+            with gzip.open(archive) as g:
+                data = g.read()
+            if b"\\begin" in data or b"\\document" in data:
+                staging.mkdir(parents=True, exist_ok=True)
+                (staging / "main.tex").write_bytes(data)
+        if staging.is_dir() and any(staging.rglob("*.tex")):
+            staging.rename(source)
+            return True
+        return False
+    except Exception as e:
+        log(f"source fetch failed {arxiv_id}: {e}")
+        return False
+    finally:
+        archive.unlink(missing_ok=True)
+        shutil.rmtree(staging, ignore_errors=True)
+
+
+def prepare_text(directory):
+    """./paper.txt: the PDF's text from pdftotext. True when there."""
+    text = directory / "paper.txt"
+    if text.exists():
+        return True
+    pdftotext = shutil.which("pdftotext", path=child_env()["PATH"])
+    if not pdftotext:
+        return False
+    try:
+        subprocess.run([pdftotext, "-layout", str(directory / "paper.pdf"), str(text)],
+                       timeout=120, check=True, capture_output=True)
+        return text.exists()
+    except Exception as e:
+        log(f"pdftotext failed {directory}: {e}")
+        text.unlink(missing_ok=True)
+        return False
+
+
+def clean_old_papers():
+    """Papers whose chat hasn't been opened for KEEP_DAYS lose their PDF, text
+    and source (prepared again on the next open). The folder stays: Claude
+    Code keys the paper's transcripts by it. Runs at most once a day."""
+    stamp = ROOT / ".last-cleanup"
+    now = time.time()
+    if stamp.exists() and now - stamp.stat().st_mtime < 86400:
+        return
+    stamp.parent.mkdir(parents=True, exist_ok=True)
+    stamp.touch()
+    papers = ROOT / "papers"
+    if not papers.is_dir():
+        return
+    for directory in papers.iterdir():
+        if not directory.is_dir():
+            continue
+        opened = directory / ".opened"
+        # Folders from before the .opened stamp: their newest file.
+        last = opened.stat().st_mtime if opened.exists() else max(
+            (p.lstat().st_mtime for p in directory.iterdir()), default=0)
+        if now - last < KEEP_DAYS * 86400:
+            continue
+        for name in ("paper.pdf", "paper.txt"):
+            (directory / name).unlink(missing_ok=True)
+        source = directory / "source"
+        if source.is_symlink():
+            source.unlink()  # only the link: /read's copy stays
+        elif source.is_dir():
+            shutil.rmtree(source, ignore_errors=True)
+        log(f"cleaned {directory.name}")
+
+
+def session_note(title, pdf_url, has_source, has_text):
+    """The note appended to Claude's system prompt: the paper, where its text
+    is, and how the chat window shows math."""
+    title = title or "this paper"
+    if has_source:
+        reading = (
+            "Its LaTeX source (text files only) is in ./source/: the authoritative text, "
+            "equations as the authors wrote them. Read it (the main .tex and every file it "
+            "\\input's) before answering the first question; Read a page of ./paper.pdf "
+            "only to see a figure, or how something is typeset."
+        )
+    elif has_text:
+        reading = (
+            "Its text is ./paper.txt (pdftotext): read it before answering the first "
+            "question and quote from it. Equations come out scrambled there, and figures "
+            "and tables don't come through, so for those Read the page of ./paper.pdf."
+        )
+    else:
+        reading = "Read the PDF before answering the first question."
+    return (
+        f'The user is reading the paper "{title}" in PaperClip and opened this chat from it. '
+        "Its PDF is ./paper.pdf in the working directory"
+        + (f" (source: {pdf_url})" if pdf_url else "")
+        + ". Questions are about this paper unless they say otherwise. " + reading
+        + " The chat window renders Markdown and LaTeX (KaTeX): write math as $...$ inline "
+        "or $$...$$ on its own lines, not as plain text or Unicode symbols."
+    )
+
+
 def summarize_input(name, tool_input):
     """One short line describing what a tool call does, for the chat window."""
     if not isinstance(tool_input, dict):
@@ -282,8 +446,13 @@ class Session:
         if not paper_id:
             send({"type": "error", "message": "no paper"})
             return
+        try:
+            clean_old_papers()
+        except Exception as e:
+            log(f"cleanup failed: {e}")
         directory = paper_dir(paper_id)
         directory.mkdir(parents=True, exist_ok=True)
+        (directory / ".opened").touch()
         self.paper = {"paperId": paper_id, "title": msg.get("title") or "", "pdfUrl": msg.get("pdfUrl") or "", "dir": directory}
         if msg.get("fresh"):
             self.session_id = None
@@ -326,16 +495,11 @@ class Session:
         if not claude:
             send({"type": "error", "message": "claude CLI not found (looked in ~/.local/bin, /opt/homebrew/bin, /usr/local/bin)"})
             return
-        title = self.paper["title"] or "this paper"
-        note = (
-            f'The user is reading the paper "{title}" in PaperClip and opened this chat from it. '
-            "Its PDF is ./paper.pdf in the working directory"
-            + (f" (source: {self.paper['pdfUrl']})" if self.paper["pdfUrl"] else "")
-            + ". Questions are about this paper unless they say otherwise; read the PDF before "
-            "answering the first one. The chat window renders Markdown and LaTeX (KaTeX): write "
-            "math as $...$ inline or $$...$$ on its own lines, not as plain text or Unicode "
-            "symbols."
-        )
+        directory = self.paper["dir"]
+        arxiv_id = arxiv_id_of(self.paper["paperId"], self.paper["pdfUrl"])
+        has_source = bool(arxiv_id) and prepare_source(directory, arxiv_id)
+        has_text = not has_source and prepare_text(directory)
+        note = session_note(self.paper["title"], self.paper["pdfUrl"], has_source, has_text)
         args = [
             claude, "-p",
             "--input-format", "stream-json",
