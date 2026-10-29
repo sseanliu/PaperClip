@@ -119,7 +119,7 @@
         <button class="chat-icon-btn" data-chat-action="history" title="Earlier chats about this paper" aria-label="Earlier chats">
           <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
         </button>
-        <button class="chat-icon-btn" data-chat-action="new" title="New chat" aria-label="New chat">
+        <button class="chat-icon-btn" data-chat-action="new" title="New chat (Option+N)" aria-label="New chat">
           <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
         </button>
         <button class="chat-icon-btn" data-chat-action="close" title="Close (Esc)" aria-label="Close">
@@ -575,6 +575,16 @@
       e.stopImmediatePropagation();
       if (isShown()) hide();
       else show();
+      return;
+    }
+    // Option+N starts a new chat while the chat is open. (Cmd+N can't be used:
+    // Chrome keeps it for New Window and never delivers it to the page.)
+    // e.code, since Option+N on a Mac is the dead key for "˜"; handling the
+    // keydown keeps the tilde out of the input.
+    if (isShown() && e.altKey && e.code === 'KeyN' && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (!busy) newChat();
       return;
     }
     // Esc leaves the history list, then closes the chat, before anything
