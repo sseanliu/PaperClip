@@ -2466,10 +2466,18 @@ body.pdf-panel-open {
   margin: 8px 0;
 }
 
-.chat-equation-image {
+/* The whole formula, not the square thumbnail of a pasted picture. */
+.chat-attachment .chat-equation-image {
   display: block;
+  width: auto;
+  height: auto;
+  flex: 0 1 auto;
+  min-width: 0;
   max-width: 100%;
-  max-height: 72px;
+  max-height: 40px;
+  object-fit: contain;
+  border: 0;
+  border-radius: 0;
 }
 
 .chat-equation-label {

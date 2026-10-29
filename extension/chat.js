@@ -633,7 +633,7 @@
 
   async function readLatex(src) {
     const { deepinfraKey } = await chrome.storage.local.get('deepinfraKey');
-    if (!deepinfraKey) return null;
+    if (!deepinfraKey) throw new Error('no DeepInfra API key (Settings)');
     const response = await fetch(LATEX_ENDPOINT, {
       method: 'POST',
       headers: { Authorization: `Bearer ${deepinfraKey}`, 'Content-Type': 'application/json' },
@@ -648,7 +648,10 @@
         ] }],
       }),
     });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    if (!response.ok) {
+      const detail = await response.text().catch(() => '');
+      throw new Error(`DeepInfra ${response.status} ${detail.slice(0, 120)}`.trim());
+    }
     const json = await response.json();
     let tex = ((json.choices && json.choices[0] && json.choices[0].message && json.choices[0].message.content) || '').trim();
     // Strip what models add anyway: fences, delimiters, an equation number.
@@ -657,18 +660,28 @@
       .replace(/\\begin\{(equation|align|gather)\*?\}|\\end\{(equation|align|gather)\*?\}/g, '')
       .replace(/\\tag\{[^}]*\}/g, '').replace(/(?:\s|\\q?quad)+\(\d+(\.\d+)*\)\s*$/, '')
       .trim();
-    if (!tex) return null;
+    if (!tex) throw new Error('the model returned no LaTeX');
     // Only LaTeX KaTeX can render is kept; otherwise the image goes instead.
-    if (window.katex) window.katex.renderToString(tex, { displayMode: true, throwOnError: true, strict: 'ignore' });
+    if (window.katex) {
+      try {
+        window.katex.renderToString(tex, { displayMode: true, throwOnError: true, strict: 'ignore' });
+      } catch (err) {
+        throw new Error(`unrenderable LaTeX (${err.message.slice(0, 80)}): ${tex.slice(0, 80)}`);
+      }
+    }
     return tex;
   }
 
   function addEquation({ src, label, page }) {
     if (!isShown()) show();
     const eq = { kind: 'equation', src, mediaType: 'image/png', data: src.slice(src.indexOf(',') + 1), label, page, latex: null };
+    // A failure says why, in the window: the equation then goes as an image.
     eq.reading = readLatex(src)
       .then((tex) => { eq.latex = tex; })
-      .catch((err) => console.warn('[paperclip] equation LaTeX failed', err && err.message))
+      .catch((err) => {
+        const name = label ? `equation ${label}` : 'the equation';
+        notice(`Couldn't read ${name} as LaTeX: ${(err && err.message) || err}. It will be sent as an image.`);
+      })
       .finally(() => {
         eq.reading = null;
         renderAttachments();
