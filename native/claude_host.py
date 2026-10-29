@@ -332,7 +332,9 @@ class Session:
             "Its PDF is ./paper.pdf in the working directory"
             + (f" (source: {self.paper['pdfUrl']})" if self.paper["pdfUrl"] else "")
             + ". Questions are about this paper unless they say otherwise; read the PDF before "
-            "answering the first one."
+            "answering the first one. The chat window renders Markdown and LaTeX (KaTeX): write "
+            "math as $...$ inline or $$...$$ on its own lines, not as plain text or Unicode "
+            "symbols."
         )
         args = [
             claude, "-p",
