@@ -36,6 +36,11 @@
   let historyEl = null;
   let imageChunks = {}; // history image ref -> base64 received so far
   let renderQueued = false;
+  // Streaming keeps the newest text in view until the user scrolls up, by
+  // any amount; reaching the bottom again (or sending) resumes following.
+  let following = true;
+  let lastScrollTop = 0;
+  let userScrollAt = 0;
 
   // ---- Markdown (small, escape-first) ----------------------------------------------
 
@@ -206,6 +211,24 @@
     noticeEl = win.querySelector('#chatNotice');
     historyEl = win.querySelector('#chatHistory');
     attachEl = win.querySelector('#chatAttachments');
+
+    // A scroll upward counts as the user's only right after their own input
+    // (wheel, touch, a key, the scrollbar): a re-render that briefly shortens
+    // the list also moves scrollTop up, and must not stop the following.
+    const markUserScroll = () => { userScrollAt = performance.now(); };
+    listEl.addEventListener('wheel', (e) => {
+      markUserScroll();
+      if (e.deltaY < 0) following = false;
+    }, { passive: true });
+    listEl.addEventListener('touchmove', markUserScroll, { passive: true });
+    listEl.addEventListener('pointerdown', markUserScroll);
+    listEl.addEventListener('keydown', markUserScroll);
+    listEl.addEventListener('scroll', () => {
+      const top = listEl.scrollTop;
+      if (top < lastScrollTop - 1 && performance.now() - userScrollAt < 600) following = false;
+      if (listEl.scrollHeight - top - listEl.clientHeight < 4) following = true;
+      lastScrollTop = top;
+    }, { passive: true });
 
     win.addEventListener('click', (e) => {
       const btn = e.target.closest('[data-chat-action]');
@@ -819,6 +842,7 @@
       return;
     }
     listEl.innerHTML = messages.map((m, i) => messageHtml(m, i === messages.length - 1)).join('');
+    following = true;
     listEl.scrollTop = listEl.scrollHeight;
   }
 
@@ -831,14 +855,13 @@
       if (!listEl) return;
       const lastEl = listEl.lastElementChild;
       const last = messages[messages.length - 1];
-      const stick = listEl.scrollHeight - listEl.scrollTop - listEl.clientHeight < 40;
       if (lastEl && last && last.role === 'assistant' && lastEl.classList.contains('is-assistant')) {
         lastEl.outerHTML = messageHtml(last, true);
       } else {
         renderAll();
         return;
       }
-      if (stick) listEl.scrollTop = listEl.scrollHeight;
+      if (following) listEl.scrollTop = listEl.scrollHeight;
     });
   }
 
