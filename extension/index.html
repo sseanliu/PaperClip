@@ -37,6 +37,12 @@
       Import library from JSON…
     </button>
     <div class="settings-divider"></div>
+    <label class="settings-field">
+      <span class="settings-field-label">DeepInfra API key</span>
+      <input class="settings-field-input" id="deepinfraKey" type="password" placeholder="Paste a key to translate selections" autocomplete="off" spellcheck="false">
+      <span class="settings-field-hint">Select text in the reader to see its Chinese translation (DeepSeek on DeepInfra).</span>
+    </label>
+    <div class="settings-divider"></div>
     <div class="settings-info" id="settingsInfo">—</div>
     <div class="settings-status" id="settingsStatus" hidden></div>
   </div>
@@ -152,5 +158,6 @@
 <!-- PDF side-peek viewer -->
 <script type="module" src="vendor/lector-panel.js"></script>
 <script type="module" src="viewer.js"></script>
+<script src="translate.js"></script>
 </body>
 </html>

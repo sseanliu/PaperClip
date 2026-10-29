@@ -588,6 +588,41 @@ header {
   margin: 4px 6px;
 }
 
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px;
+}
+
+.settings-field-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.settings-field-input {
+  width: 100%;
+  padding: 7px 10px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--warm-gray);
+  border-radius: 6px;
+  outline: none;
+}
+
+.settings-field-input:focus {
+  border-color: var(--accent-amber);
+}
+
+.settings-field-hint {
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
 .settings-info,
 .settings-status {
   padding: 6px 12px 8px;
@@ -1794,4 +1829,31 @@ body.pdf-panel-open {
 .paper-card.is-selected .paper-card-cover {
   border-color: var(--accent-amber);
   box-shadow: 0 0 0 2px rgba(200, 113, 58, 0.18);
+}
+
+/* ---- Selection translation card (translate.js) ---- */
+.translate-card {
+  position: fixed;
+  /* Above the reader (250) and its toolbar. */
+  z-index: 260;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--card-bg);
+  color: var(--ink);
+  border: 1px solid var(--warm-gray);
+  box-shadow: 0 8px 30px var(--popover-shadow);
+  font: 14px/1.6 'DM Sans', -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif;
+  white-space: pre-wrap;
+  /* Display only; clicks go to the page underneath. */
+  pointer-events: none;
+}
+
+.translate-card[hidden] {
+  display: none;
+}
+
+.translate-card[data-state="pending"],
+.translate-card[data-state="note"] {
+  font-size: 13px;
+  color: var(--muted);
 }

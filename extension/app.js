@@ -1334,10 +1334,28 @@ function initSettingsMenu() {
     if (menu.hidden) {
       menu.hidden = false;
       refreshSettingsInfo();
+      refreshKeyField();
     } else {
       menu.hidden = true;
     }
   });
+
+  // DeepInfra key for selection translation (translate.js). Local only:
+  // never exported, never sent to the vault.
+  const keyInput = document.getElementById('deepinfraKey');
+  async function refreshKeyField() {
+    if (!keyInput) return;
+    const { deepinfraKey = '' } = await chrome.storage.local.get('deepinfraKey');
+    keyInput.value = deepinfraKey;
+  }
+  if (keyInput) {
+    keyInput.addEventListener('change', async () => {
+      const key = keyInput.value.trim();
+      if (key) await chrome.storage.local.set({ deepinfraKey: key });
+      else await chrome.storage.local.remove('deepinfraKey');
+      setSettingsStatus(key ? 'API key saved.' : 'API key removed.');
+    });
+  }
 
   document.addEventListener('click', (e) => {
     if (menu.hidden) return;
