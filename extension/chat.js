@@ -12,6 +12,8 @@
 (function () {
   const HOST = 'com.xiaoan.paperclip.claude';
   const POSITION_KEY = 'paperclip-chat-position';
+  const SIZE_KEY = 'paperclip-chat-size';
+  const RESIZE_EDGES = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
   // One-click starter shown on an empty conversation.
   const SUGGESTION = '这篇 paper 讲了什么？';
   const KEEP_VISIBLE_PX = 80; // a dragged window keeps this much on screen
@@ -183,6 +185,7 @@
         <textarea class="chat-input" id="chatInput" rows="1" placeholder="Ask about this paper…"></textarea>
         <button class="chat-send" data-chat-action="send" title="Send (Enter)">Send</button>
       </div>
+      ${RESIZE_EDGES.map((edge) => `<div class="chat-resize is-${edge}" data-edge="${edge}"></div>`).join('')}
     `;
     document.body.appendChild(win);
     listEl = win.querySelector('#chatList');
@@ -253,8 +256,81 @@
       if (saved) placeAt(saved.left, saved.top);
     } catch {}
     addEventListener('resize', () => {
+      if (win.style.width) setSize(parseFloat(win.style.width), parseFloat(win.style.height));
       if (win.classList.contains('is-placed')) placeAt(parseFloat(win.style.left), parseFloat(win.style.top));
     });
+
+    // Drag an edge or corner to resize (no smaller than the default size);
+    // double-click one to go back to the default size.
+    for (const handle of win.querySelectorAll('.chat-resize')) {
+      handle.addEventListener('pointerdown', startResize);
+      handle.addEventListener('dblclick', resetSize);
+    }
+    try {
+      const saved = JSON.parse(localStorage.getItem(SIZE_KEY) || 'null');
+      if (saved) setSize(saved.width, saved.height);
+    } catch {}
+  }
+
+  // The default size (CSS) is also the minimum.
+  function defaultSize() {
+    return { width: Math.min(680, innerWidth - 32), height: Math.min(640, innerHeight * 0.76) };
+  }
+
+  function setSize(width, height) {
+    const min = defaultSize();
+    win.style.width = `${Math.round(Math.max(min.width, Math.min(innerWidth, width)))}px`;
+    win.style.height = `${Math.round(Math.max(min.height, Math.min(innerHeight, height)))}px`;
+  }
+
+  function resetSize() {
+    win.style.width = '';
+    win.style.height = '';
+    try { localStorage.removeItem(SIZE_KEY); } catch {}
+    if (win.classList.contains('is-placed')) placeAt(parseFloat(win.style.left), parseFloat(win.style.top));
+  }
+
+  function startResize(e) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const handle = e.currentTarget;
+    const edge = handle.dataset.edge;
+    const start = win.getBoundingClientRect();
+    const min = defaultSize();
+    // Resizing from the left or top moves the window, so pin it at its
+    // current spot first (a centered window is positioned by a transform).
+    win.classList.add('is-placed');
+    win.style.left = `${start.left}px`;
+    win.style.top = `${start.top}px`;
+    handle.setPointerCapture(e.pointerId);
+    document.body.classList.add('chat-resizing');
+    document.body.dataset.chatResize = edge;
+    const move = (ev) => {
+      let { left, top, right, bottom } = start;
+      if (edge.includes('e')) right = Math.min(innerWidth, Math.max(left + min.width, ev.clientX));
+      if (edge.includes('w')) left = Math.max(0, Math.min(right - min.width, ev.clientX));
+      if (edge.includes('s')) bottom = Math.min(innerHeight, Math.max(top + min.height, ev.clientY));
+      if (edge.includes('n')) top = Math.max(0, Math.min(bottom - min.height, ev.clientY));
+      win.style.left = `${Math.round(left)}px`;
+      win.style.top = `${Math.round(top)}px`;
+      win.style.width = `${Math.round(right - left)}px`;
+      win.style.height = `${Math.round(bottom - top)}px`;
+    };
+    const end = () => {
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', end);
+      handle.removeEventListener('pointercancel', end);
+      document.body.classList.remove('chat-resizing');
+      delete document.body.dataset.chatResize;
+      try {
+        localStorage.setItem(SIZE_KEY, JSON.stringify({ width: parseFloat(win.style.width), height: parseFloat(win.style.height) }));
+        localStorage.setItem(POSITION_KEY, JSON.stringify({ left: parseFloat(win.style.left), top: parseFloat(win.style.top) }));
+      } catch {}
+    };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', end);
+    handle.addEventListener('pointercancel', end);
   }
 
   /** Moves the window so its top-left is at (left, top), keeping it reachable. */

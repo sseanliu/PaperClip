@@ -1905,6 +1905,40 @@ body.chat-dragging {
   user-select: none;
 }
 
+/* Invisible resize handles on the window's edges and corners (chat.js). */
+.chat-resize {
+  position: absolute;
+  z-index: 2;
+}
+
+/* Corners are 20px (the window's 16px radius clips their outer pixels);
+   edges run between them. */
+.chat-resize.is-n,
+.chat-resize.is-s { left: 20px; right: 20px; height: 6px; cursor: ns-resize; }
+.chat-resize.is-n { top: 0; }
+.chat-resize.is-s { bottom: 0; }
+
+.chat-resize.is-e,
+.chat-resize.is-w { top: 20px; bottom: 20px; width: 6px; cursor: ew-resize; }
+.chat-resize.is-e { right: 0; }
+.chat-resize.is-w { left: 0; }
+
+.chat-resize.is-ne,
+.chat-resize.is-nw,
+.chat-resize.is-se,
+.chat-resize.is-sw { width: 20px; height: 20px; }
+.chat-resize.is-ne { top: 0; right: 0; cursor: nesw-resize; }
+.chat-resize.is-sw { bottom: 0; left: 0; cursor: nesw-resize; }
+.chat-resize.is-nw { top: 0; left: 0; cursor: nwse-resize; }
+.chat-resize.is-se { bottom: 0; right: 0; cursor: nwse-resize; }
+
+/* While resizing, keep the edge's cursor and stop text selection. */
+body.chat-resizing { user-select: none; }
+body[data-chat-resize="n"], body[data-chat-resize="s"] { cursor: ns-resize; }
+body[data-chat-resize="e"], body[data-chat-resize="w"] { cursor: ew-resize; }
+body[data-chat-resize="ne"], body[data-chat-resize="sw"] { cursor: nesw-resize; }
+body[data-chat-resize="nw"], body[data-chat-resize="se"] { cursor: nwse-resize; }
+
 .chat-header {
   display: flex;
   align-items: center;
