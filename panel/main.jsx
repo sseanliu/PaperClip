@@ -298,7 +298,16 @@ const MB = 1024 * 1024;
 // sweeping bar instead. A PDF from the local cache never shows one.
 function LoadingCard() {
   const [progress, setProgress] = useState(null);
-  useEffect(() => onDownloadProgress(({ loaded, total }) => setProgress({ loaded, total })), []);
+  // pdf.js reports every network chunk (thousands per file); redraw only
+  // when the shown size moves by 0.1 MB.
+  useEffect(
+    () =>
+      onDownloadProgress(({ loaded, total }) => {
+        const step = Math.round(loaded / (MB / 10));
+        setProgress((prev) => (prev && prev.step === step && prev.total === total ? prev : { loaded, total, step }));
+      }),
+    [],
+  );
   const known = progress && progress.total > 0;
   const size = progress && progress.loaded > 0
     ? known
