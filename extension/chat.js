@@ -99,11 +99,57 @@
     return `<p>${lines.map(inline).join('<br>')}</p>`;
   }
 
+  // ---- Math (KaTeX, loaded with the chat window) ---------------------------------
+
+  // $$..$$ and \[..\] are display math; $..$ and \(..\) inline. An inline $
+  // must hug its content and not be followed by a digit, so "$5 and $10"
+  // stays text. Unclosed delimiters (mid-stream) stay text until they close.
+  const MATH = /\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)|\$(?![\s$])((?:\\.|[^$\\\n])+?)(?<!\s)\$(?!\d)/g;
+  let katexLoading = null;
+
+  function loadKatex() {
+    if (window.katex || katexLoading) return;
+    const css = document.createElement('link');
+    css.rel = 'stylesheet';
+    css.href = 'vendor/katex/katex.min.css';
+    document.head.appendChild(css);
+    katexLoading = new Promise((resolve) => {
+      const script = document.createElement('script');
+      script.src = 'vendor/katex/katex.min.js';
+      script.onload = resolve;
+      script.onerror = resolve;
+      document.head.appendChild(script);
+    }).then(() => { if (window.katex) renderAll(); });
+  }
+
+  function texHtml(tex, displayMode) {
+    if (!window.katex) return esc(displayMode ? `$$${tex}$$` : `$${tex}$`);
+    try {
+      return window.katex.renderToString(tex.trim(), { displayMode, throwOnError: false, strict: 'ignore', output: 'htmlAndMathml' });
+    } catch {
+      return esc(tex);
+    }
+  }
+
+  /**
+   * Swaps math for placeholders (private-use characters the Markdown pass
+   * leaves alone), so "<", "*" or "_" inside a formula never reach it.
+   */
+  function stashMath(text, stash) {
+    return text.replace(MATH, (_, d1, d2, i1, i2) => {
+      const display = d1 !== undefined || d2 !== undefined;
+      stash.push(texHtml(d1 ?? d2 ?? i1 ?? i2, display));
+      return `\uE000${stash.length - 1}\uE001`;
+    });
+  }
+
   function markdown(src) {
     // Odd pieces sit between ``` fences; a fence still streaming in shows as code.
-    return src.split('```').map((piece, i) => (i % 2
-      ? `<pre><code>${esc(piece.replace(/^[\w+-]*\n/, ''))}</code></pre>`
-      : textBlocks(piece))).join('');
+    return src.split('```').map((piece, i) => {
+      if (i % 2) return `<pre><code>${esc(piece.replace(/^[\w+-]*\n/, ''))}</code></pre>`;
+      const stash = [];
+      return textBlocks(stashMath(piece, stash)).replace(/\uE000(\d+)\uE001/g, (_, n) => stash[n]);
+    }).join('');
   }
 
   // ---- Window ----------------------------------------------------------------------
@@ -261,6 +307,7 @@
     const current = window.PaperViewer && window.PaperViewer.current();
     if (!current) return;
     if (!win) build();
+    loadKatex();
     win.hidden = false;
     if (!paper || paper.id !== current.paper.id || !port) {
       connect({ id: current.paper.id, title: current.paper.title || current.paper.url || '', pdfUrl: current.pdfUrl });

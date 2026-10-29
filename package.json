@@ -3,10 +3,12 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "build:panel": "esbuild panel/main.jsx --bundle --jsx=automatic --format=esm --minify --loader:.svg=empty --loader:.gif=empty --loader:.png=empty --loader:.cur=empty --outfile=extension/vendor/lector-panel.js && cp node_modules/pdfjs-dist/build/pdf.worker.min.mjs extension/vendor/lector-pdf.worker.min.mjs"
+    "build:panel": "esbuild panel/main.jsx --bundle --jsx=automatic --format=esm --minify --loader:.svg=empty --loader:.gif=empty --loader:.png=empty --loader:.cur=empty --outfile=extension/vendor/lector-panel.js && cp node_modules/pdfjs-dist/build/pdf.worker.min.mjs extension/vendor/lector-pdf.worker.min.mjs",
+    "vendor:katex": "mkdir -p extension/vendor/katex/fonts && cp node_modules/katex/dist/katex.min.js node_modules/katex/dist/katex.min.css extension/vendor/katex/ && cp node_modules/katex/dist/fonts/*.woff2 extension/vendor/katex/fonts/"
   },
   "dependencies": {
     "@anaralabs/lector": "latest",
+    "katex": "^0.19.1",
     "pdfjs-dist": "^5.5.207",
     "react": "^19.0.0",
     "react-dom": "^19.0.0"

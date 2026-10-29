@@ -2070,6 +2070,18 @@ body.chat-dragging .chat-header {
   color: var(--accent-amber);
 }
 
+/* KaTeX: a touch larger than the text; wide display math scrolls. */
+.chat-md .katex {
+  font-size: 1.08em;
+}
+
+.chat-md .katex-display {
+  margin: 4px 0 8px;
+  padding: 2px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
 /* Wide tables scroll sideways inside the message. */
 .chat-table {
   margin: 0 0 8px;
