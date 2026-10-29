@@ -114,9 +114,10 @@ const lastCapturedByTab = new Map();
  */
 async function capturePaper(tab, mode = 'visit') {
   if (!tab || !tab.url) return;
-  // A PDF shown in PaperClip's reader is captured under its own URL.
+  // A PDF shown in PaperClip's reader is captured under its own URL. The
+  // library's own title ("PaperClip", before the paper's is set) isn't its.
   const target = readerTarget(tab.url);
-  if (target) tab = { ...tab, url: target };
+  if (target) tab = { ...tab, url: target, title: tab.title === 'PaperClip' ? '' : tab.title };
   const cls = classifyPaper(tab.url);
   if (!cls) {
     if (tab.id != null) lastCapturedByTab.delete(tab.id);
@@ -628,9 +629,10 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 
 // ---------------------------------------------------------------------------
 // PDFs open in PaperClip's reader. A main-frame response served as a PDF is
-// redirected to reader.html#<its URL>; the rule matches on the response's
+// redirected to index.html#<its URL>; the rule matches on the response's
 // Content-Type, so links without ".pdf" (arxiv.org/pdf/<id>, openreview
-// pdf?id=) count too. Settings can turn it off (openPdfsInReader).
+// pdf?id=) count too. It lands on index.html#<url>: the library with the
+// paper open (viewer.js). Settings can turn it off (openPdfsInReader).
 // ---------------------------------------------------------------------------
 
 const PDF_RULE_ID = 1;
@@ -644,7 +646,7 @@ async function syncPdfRule() {
       priority: 1,
       action: {
         type: 'redirect',
-        redirect: { regexSubstitution: `${chrome.runtime.getURL('reader.html')}#\\0` },
+        redirect: { regexSubstitution: `${chrome.runtime.getURL('index.html')}#\\0` },
       },
       condition: {
         regexFilter: '^https?://.*',
@@ -662,7 +664,8 @@ syncPdfRule().catch((err) => console.warn('[paperclip] PDF rule', err));
 
 // "Open in Chrome's viewer" from the reader: let this one navigation through.
 // A session rule allows main-frame loads in that tab until the PDF has
-// loaded, then goes away.
+// loaded, then goes away. sameTab: the PDF came from the web into this tab;
+// otherwise it opens in a new tab beside it.
 const nativeOpenRules = new Map(); // tabId -> { ruleId, url }
 
 async function openInNativeViewer(tabId, url) {
@@ -703,7 +706,10 @@ chrome.declarativeNetRequest.getSessionRules().then((rules) => {
 // loads, as a safety net for anything we missed.
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg && msg.type === 'paperclip:open-native' && sender.tab && msg.url) {
-    openInNativeViewer(sender.tab.id, msg.url)
+    (msg.sameTab
+      ? Promise.resolve(sender.tab.id)
+      : chrome.tabs.create({ url: 'about:blank', index: sender.tab.index + 1, openerTabId: sender.tab.id }).then((t) => t.id))
+      .then((tabId) => openInNativeViewer(tabId, msg.url))
       .then(() => sendResponse({ ok: true }))
       .catch((err) => sendResponse({ ok: false, error: String(err && err.message) }));
     return true;

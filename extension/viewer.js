@@ -12,6 +12,10 @@
  * fires a `paperviewer:change` event on document whenever the open paper
  * changes (detail { paper, pdfUrl, focus }, or null once closed; focus is
  * true when the user opened it, false for a keyboard preview).
+ *
+ * A PDF opened anywhere on the web lands here too: the background redirects
+ * it to index.html#<pdf url>, and openLinkedPdf() opens it over the library
+ * just as a click on its cover would.
  */
 
 import * as pdfjsLib from './vendor/pdf.min.mjs';
@@ -28,10 +32,11 @@ let currentPaperId = null;
 let currentPaper = null;
 let currentUrl = null;
 let currentPdfUrl = null;
-// Set on reader.html, where the reader is the whole tab: a PDF the browser
-// opened. { onOpenNative, onDownload, onDocument } from reader.js; there is
-// no library behind it to close back to.
-let standalone = null;
+// A PDF opened on the web arrives as this page with its URL after the '#'
+// (background.js redirect rule): index.html#<pdf url>, the library with that
+// paper open, as if clicked here. linkedUrl is that URL while its paper is
+// open; the hash goes once the reader closes or shows another paper.
+let linkedUrl = null;
 let pageObserver = null;
 let renderGeneration = 0; // invalidates in-flight renders when doc changes
 
@@ -149,30 +154,31 @@ function focusReader(tries = 20) {
 // inside it, and zoom scales the paper within the window.
 const READING_WIDTH = 1000;
 
-async function open(paper, { focus = false, pdfUrl = null, standalone: page = null } = {}) {
+async function open(paper, { focus = false, pdfUrl = null, onDocument = null } = {}) {
   if (!els() || !paper) return;
 
-  standalone = page;
   const url = pdfUrl || pdfUrlFor(paper);
+  if (linkedUrl && url !== linkedUrl) unlink();
   currentPaperId = paper.id;
   currentPaper = paper;
   currentPdfUrl = url;
   currentUrl = url || paper.url || null;
   document.dispatchEvent(new CustomEvent('paperviewer:change', {
-    detail: { paper, pdfUrl: url, focus, standalone: !!standalone },
+    detail: { paper, pdfUrl: url, focus },
   }));
   // Reading a paper here counts as opening it ("Recently opened" sort); a
-  // keyboard preview while moving through the list doesn't. A PDF tab was
-  // already counted as a visit by the background.
-  if (focus && !standalone) {
+  // keyboard preview while moving through the list doesn't. A PDF from the
+  // web was already counted as a visit by the background.
+  if (focus && url !== linkedUrl) {
     PaperStore.update(paper.id, (p) => { p.lastSeenAt = new Date().toISOString(); }).catch(() => {});
   }
 
   titleEl.textContent = paper.title || paper.url || 'Untitled';
   titleEl.title = titleEl.textContent;
   panel.hidden = false;
-  if (backdrop) backdrop.hidden = !!standalone;
+  if (backdrop) backdrop.hidden = false;
   document.body.classList.add('pdf-panel-open');
+  document.title = titleEl.textContent;
 
   await teardownDoc();
   const generation = renderGeneration;
@@ -203,9 +209,9 @@ async function open(paper, { focus = false, pdfUrl = null, standalone: page = nu
       // The Lector toolbar carries the title and window buttons; the panel
       // header is hidden in this mode.
       title: titleEl.textContent,
-      onClose: standalone ? undefined : close,
+      onClose: close,
       onLoad: (proxy) => {
-        if (standalone && standalone.onDocument) standalone.onDocument(proxy);
+        if (onDocument) onDocument(proxy);
         // Once the whole file has arrived, keep it for the next open.
         if (cached) return;
         proxy.getDownloadInfo()
@@ -213,11 +219,10 @@ async function open(paper, { focus = false, pdfUrl = null, standalone: page = nu
           .then((bytes) => putCachedPdf(url, bytes))
           .catch(() => {});
       },
-      onDownload: standalone ? standalone.onDownload : undefined,
-      openTabTitle: standalone ? "Open in Chrome's PDF viewer" : undefined,
-      onOpenTab: standalone
-        ? standalone.onOpenNative
-        : () => { if (currentUrl) chrome.tabs.create({ url: currentUrl }); },
+      onDownload: download,
+      // A plain tab would bring the PDF straight back here (the redirect).
+      openTabTitle: "Open in Chrome's PDF viewer",
+      onOpenTab: openNative,
       onError: () => {
         if (generation !== renderGeneration) return;
         teardownLector();
@@ -313,6 +318,9 @@ async function close() {
   currentPaperId = null;
   currentPaper = null;
   currentUrl = null;
+  currentPdfUrl = null;
+  unlink();
+  document.title = 'PaperClip';
   document.dispatchEvent(new CustomEvent('paperviewer:change', { detail: null }));
   await teardownDoc();
   bodyEl.classList.remove('is-frame');
@@ -338,7 +346,6 @@ document.addEventListener('keydown', (e) => {
  */
 function closeOnOpenSpace(e) {
   if (!bodyEl.classList.contains('is-lector')) return;
-  if (standalone) return;
   if (window.getSelection && window.getSelection().toString()) return;
   if (e.target.closest('.lector-toolbar, .lector-thumbs, .lector-search-pane, a, button, input')) return;
   for (const canvas of bodyEl.querySelectorAll('.lector-pages canvas')) {
@@ -353,15 +360,104 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('pdfPanelClose').addEventListener('click', close);
   if (backdrop) backdrop.addEventListener('click', close);
   bodyEl.addEventListener('click', closeOnOpenSpace);
-  openTabBtn.addEventListener('click', () => {
-    if (currentUrl) chrome.tabs.create({ url: currentUrl });
-  });
+  openTabBtn.addEventListener('click', openNative);
+  openLinkedPdf();
 });
+
+function unlink() {
+  if (!linkedUrl) return;
+  linkedUrl = null;
+  history.replaceState(null, '', location.pathname);
+}
+
+function fileName(url) {
+  try {
+    const u = new URL(url);
+    const last = decodeURIComponent(u.pathname.split('/').filter(Boolean).pop() || u.hostname);
+    return /\.pdf$/i.test(last) ? last : `${last}.pdf`;
+  } catch {
+    return 'paper.pdf';
+  }
+}
+
+// A title worth showing: not empty, a URL, a file name, or the
+// "<Source>:<id>" stand-in the library saves before metadata arrives.
+function realTitle(t) {
+  return !!t && !/^[a-z][\w-]*:\S+$/i.test(t.trim()) && !/^[\w.-]+\.pdf$/i.test(t.trim());
+}
+
+/** Save the open PDF: from the cache, else fetched with the site's cookies. */
+async function download() {
+  const url = currentPdfUrl;
+  if (!url) return;
+  try {
+    let bytes = await getCachedPdf(url);
+    if (!bytes) {
+      const res = await fetch(url, { credentials: 'include' });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      bytes = await res.arrayBuffer();
+    }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }));
+    a.download = fileName(url);
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 60 * 1000);
+  } catch (err) {
+    console.warn('[paperclip] download failed', url, err && err.message);
+    openNative();
+  }
+}
+
+/**
+ * Show the open PDF in Chrome's own viewer: in this tab when the PDF came
+ * from the web here, else in a new tab. The background lets that one load
+ * past the redirect.
+ */
+function openNative() {
+  const url = currentPdfUrl || currentUrl;
+  if (!url) return;
+  chrome.runtime.sendMessage({ type: 'paperclip:open-native', url, sameTab: url === linkedUrl });
+}
+
+/** index.html#<pdf url>: open that PDF over the library, as a click would. */
+async function openLinkedPdf() {
+  const url = readerTarget(location.href);
+  if (!url || !/^https?:\/\//i.test(url)) return;
+  // Another site could frame the library to show a PDF under its own UI.
+  if (window.top !== window) return;
+  linkedUrl = url;
+  const cls = classifyPaper(url);
+  const id = cls ? cls.canonicalId : `url:${url}`;
+  const known = cls && await PaperStore.findByIdOrAlias(cls.canonicalId);
+  const titled = !!known && realTitle(known.title);
+  const paper = titled ? known : { ...(known || { id, url, source: cls ? cls.source : 'pdf' }), title: fileName(url) };
+
+  // Metadata (arXiv, Semantic Scholar) may name the paper a moment later.
+  const stop = PaperStore.onChange(async () => {
+    if (currentPaperId !== paper.id) return stop();
+    const p = await PaperStore.findByIdOrAlias(id);
+    if (p && realTitle(p.title)) setTitle(p.title);
+  });
+
+  open(paper, {
+    focus: true,
+    pdfUrl: url,
+    // An unknown paper takes the PDF's own title, as Chrome's viewer shows
+    // it; the background captures the paper with this tab title.
+    onDocument: titled ? null : (proxy) => {
+      proxy.getMetadata().then(({ info }) => {
+        const title = info && typeof info.Title === 'string' ? info.Title.trim() : '';
+        if (realTitle(title) && !realTitle(currentPaper && currentPaper.title)) setTitle(title);
+      }).catch(() => {});
+    },
+  });
+}
 
 /** The open paper's title arrived or changed (metadata after a PDF tab opened). */
 function setTitle(title) {
   if (!currentPaper || !title || currentPaper.title === title) return;
   currentPaper.title = title;
+  document.title = title;
   if (titleEl) {
     titleEl.textContent = title;
     titleEl.title = title;

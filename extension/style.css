@@ -2476,9 +2476,3 @@ body.pdf-panel-open {
   border-color: color-mix(in srgb, var(--warm-gray), var(--ink) 18%);
 }
 
-
-/* reader.html: a PDF the browser opened fills the tab on the page color,
-   with no library underneath. */
-body.reader-page {
-  background: var(--paper);
-}

@@ -478,12 +478,8 @@ async function workQueue() {
   }
 }
 
-// The queue belongs to the library page; a PDF tab (reader.html) only needs
-// pdfUrlFor from this module.
-const IS_LIBRARY = !!document.getElementById('paperLibrary');
-
 async function processQueue() {
-  if (!IS_LIBRARY || document.hidden) return;
+  if (document.hidden) return;
   if (running) { rerunRequested = true; return; }
   running = true;
   try {

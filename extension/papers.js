@@ -5,7 +5,7 @@
  * (via <script src>). Defines globals on `self` so it works in both contexts.
  *
  * classifyPaper(url) → { source, sourceId, canonicalId, doi? } | null
- * readerTarget(url) → the PDF URL inside a reader.html#<url> tab URL, or null
+ * readerTarget(url) → the PDF URL inside an index.html#<url> tab URL, or null
  *
  * canonicalId is what dedupes the same paper across multiple URL variants
  * (e.g. arxiv abs vs arxiv pdf vs arxiv html → same `arxiv:<id>`).
@@ -26,10 +26,10 @@
     return /^(\d{4}\.\d{4,5}|[a-z][a-z.\-]*\/\d{7})$/i.test(id || '');
   }
 
-  // A PDF the browser opened in PaperClip's reader: the tab's URL is
-  // chrome-extension://<id>/reader.html#<the PDF's URL>.
+  // A PDF the browser opened in PaperClip: the tab shows the library with
+  // the paper open, at chrome-extension://<id>/index.html#<the PDF's URL>.
   const READER_PAGE = typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getURL
-    ? chrome.runtime.getURL('reader.html')
+    ? chrome.runtime.getURL('index.html')
     : null;
 
   function readerTarget(rawUrl) {
