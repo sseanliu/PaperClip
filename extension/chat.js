@@ -21,7 +21,6 @@
   let win = null;
   let listEl = null;
   let inputEl = null;
-  let sendBtn = null;
   let titleEl = null;
   let noticeEl = null;
 
@@ -198,14 +197,12 @@
       <div class="chat-attachments" id="chatAttachments" hidden></div>
       <div class="chat-compose">
         <textarea class="chat-input" id="chatInput" rows="1" placeholder="Ask about this paper…"></textarea>
-        <button class="chat-send" data-chat-action="send" title="Stop the answer" hidden>Stop</button>
       </div>
       ${RESIZE_EDGES.map((edge) => `<div class="chat-resize is-${edge}" data-edge="${edge}"></div>`).join('')}
     `;
     document.body.appendChild(win);
     listEl = win.querySelector('#chatList');
     inputEl = win.querySelector('#chatInput');
-    sendBtn = win.querySelector('.chat-send');
     titleEl = win.querySelector('#chatPaper');
     noticeEl = win.querySelector('#chatNotice');
     historyEl = win.querySelector('#chatHistory');
@@ -219,7 +216,6 @@
       else if (action === 'new') newChat();
       else if (action === 'history') toggleHistory();
       else if (action === 'open-session') openSession(btn.dataset.sessionId);
-      else if (action === 'send') (busy ? interrupt() : submit());
       else if (action === 'suggest' && !busy) submit(SUGGESTION);
       else if (action === 'allow' || action === 'deny') answerPermission(btn.dataset.requestId, action === 'allow');
       else if (action === 'remove-image') {
@@ -532,12 +528,9 @@
     }
   }
 
+  // Enter sends; Esc stops an answer in progress (see the keydown handler).
   function setBusy(value) {
     busy = value;
-    // Enter sends; the button only appears, as Stop, while Claude answers.
-    if (sendBtn) {
-      sendBtn.hidden = !busy;
-    }
   }
 
   // ---- Images ----------------------------------------------------------------------
@@ -878,12 +871,14 @@
       if (!busy) newChat();
       return;
     }
-    // Esc leaves the history list, then closes the chat, before anything
-    // else (the reader stays open).
+    // Esc stops an answer in progress (as in the terminal), else leaves the
+    // history list, else closes the chat, before anything else (the reader
+    // stays open).
     if (e.key === 'Escape' && isShown()) {
       e.preventDefault();
       e.stopImmediatePropagation();
-      if (win.classList.contains('is-history')) closeHistory();
+      if (busy) interrupt();
+      else if (win.classList.contains('is-history')) closeHistory();
       else hide();
     }
   }, true);
