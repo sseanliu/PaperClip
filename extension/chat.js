@@ -13,6 +13,8 @@
   const HOST = 'com.xiaoan.paperclip.claude';
   const MAX_SAVED_MESSAGES = 100;
   const POSITION_KEY = 'paperclip-chat-position';
+  // One-click starter shown on an empty conversation.
+  const SUGGESTION = '这篇 paper 讲了什么？';
   const KEEP_VISIBLE_PX = 80; // a dragged window keeps this much on screen
 
   let win = null;
@@ -141,6 +143,7 @@
       if (action === 'close') hide();
       else if (action === 'new') newChat();
       else if (action === 'send') (busy ? interrupt() : submit());
+      else if (action === 'suggest' && !busy) submit(SUGGESTION);
       else if (action === 'allow' || action === 'deny') answerPermission(btn.dataset.requestId, action === 'allow');
     });
     inputEl.addEventListener('keydown', (e) => {
@@ -329,11 +332,14 @@
     }
   }
 
-  function submit() {
-    const text = inputEl.value.trim();
+  /** Sends `prompt` (a suggestion), or else what's typed in the input. */
+  function submit(prompt) {
+    const text = (prompt || inputEl.value).trim();
     if (!text) return;
-    inputEl.value = '';
-    autosize();
+    if (!prompt) {
+      inputEl.value = '';
+      autosize();
+    }
     messages.push({ role: 'user', parts: [{ type: 'text', text }] });
     messages.push({ role: 'assistant', parts: [] });
     setBusy(true);
@@ -460,6 +466,7 @@
         <div class="chat-empty">
           <div class="chat-empty-title">Ask anything about this paper</div>
           <div class="chat-empty-hint">Runs your Claude Code: your subscription, settings and tools, with the PDF in its working folder.</div>
+          <button class="chat-suggestion" data-chat-action="suggest">${esc(SUGGESTION)}</button>
         </div>`;
       return;
     }

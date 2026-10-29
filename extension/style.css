@@ -1984,6 +1984,24 @@ body.chat-dragging .chat-header {
   color: var(--muted);
 }
 
+.chat-suggestion {
+  margin-top: 18px;
+  padding: 8px 16px;
+  border: 1px solid var(--warm-gray);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s;
+}
+
+.chat-suggestion:hover {
+  background: var(--warm-gray);
+  border-color: var(--muted);
+}
+
 .chat-msg {
   font-size: 14px;
   line-height: 1.6;
