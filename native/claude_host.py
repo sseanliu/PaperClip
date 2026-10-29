@@ -17,8 +17,17 @@ Wire formats verified against CLI 2.1.312 (2026-10-28): the reply to a
 can_use_tool request is nested, {"type": "control_response", "response":
 {"subtype": "success", "request_id", "response": {"behavior", ...}}}.
 
+Sessions are Claude Code's own transcripts: every paper has its own working
+directory, so ~/.claude/projects/<that directory, slugged>/*.jsonl holds all
+of its conversations. The chat's history list and the messages shown for a
+session are read from there (titles are the first question: -p sessions
+get no ai-title); nothing is stored separately.
+
 Extension -> host
-  {"type": "start", "paperId", "title", "pdfUrl", "resume": bool}
+  {"type": "start", "paperId", "title", "pdfUrl", "sessionId"?, "fresh"?}
+                                           resumes sessionId, else the latest
+                                           session; fresh starts a new one
+  {"type": "sessions"}                     list this paper's sessions
   {"type": "pdf", "data": base64}          reply to need_pdf
   {"type": "ask", "text"}
   {"type": "permission", "requestId", "allow": bool}
@@ -26,6 +35,8 @@ Extension -> host
 Host -> extension
   {"type": "status", "text"}
   {"type": "need_pdf"}                     the host couldn't download it
+  {"type": "history", "sessionId", "messages"}   the resumed session so far
+  {"type": "sessions", "items": [{"id", "title", "prompts", "created", "active"}]}
   {"type": "ready", "sessionId", "resumed": bool}
   {"type": "text", "text"}                 assistant text, streamed
   {"type": "tool", "name", "detail"}
@@ -42,6 +53,7 @@ import itertools
 import json
 import os
 import pwd
+import re
 import shutil
 import struct
 import subprocess
@@ -53,7 +65,8 @@ from pathlib import Path
 
 HOME = Path.home()
 ROOT = HOME / "Library" / "Caches" / "PaperClip" / "claude"
-SESSIONS = ROOT / "sessions.json"
+PROJECTS = HOME / ".claude" / "projects"
+HISTORY_BUDGET = 900_000  # bytes of history JSON per message (Chrome caps a host message at 1 MB)
 LOG = Path("/tmp/paperclip-claude-host.log")
 # Chrome starts hosts with a minimal PATH; claude and the tools it runs live here.
 EXTRA_PATH = [str(HOME / ".local" / "bin"), "/opt/homebrew/bin", "/usr/local/bin"]
@@ -99,17 +112,83 @@ def find_claude():
     return shutil.which("claude", path=child_env()["PATH"])
 
 
-def load_sessions():
-    try:
-        return json.loads(SESSIONS.read_text())
-    except Exception:
-        return {}
+def transcripts_dir(cwd):
+    # Claude Code names a project's folder after its working directory with
+    # every non-alphanumeric character turned into "-".
+    return PROJECTS / re.sub(r"[^A-Za-z0-9]", "-", str(cwd))
 
 
-def save_session(paper_id, session_id):
-    sessions = load_sessions()
-    sessions[paper_id] = session_id
-    SESSIONS.write_text(json.dumps(sessions, indent=1))
+def scan_transcript(path):
+    """The session as chat messages ({role, parts}) plus its list entry."""
+    messages = []
+    first_ts = last_ts = ""
+    title = ""
+    prompts = 0
+    for line in open(path, encoding="utf-8", errors="ignore"):
+        if '"type":"user"' not in line and '"type":"assistant"' not in line:
+            continue
+        try:
+            o = json.loads(line)
+        except Exception:
+            continue
+        if o.get("isSidechain") or o.get("isMeta"):
+            continue
+        ts = o.get("timestamp") or ""
+        content = (o.get("message") or {}).get("content")
+        if o.get("type") == "user":
+            # A typed question is a string; tool results come back as lists.
+            if not isinstance(content, str) or not content.strip() or content.startswith("<"):
+                continue
+            prompts += 1
+            title = title or " ".join(content.split())[:120]
+            messages.append({"role": "user", "parts": [{"type": "text", "text": content}]})
+        else:
+            if not isinstance(content, list):
+                continue
+            if not messages or messages[-1]["role"] != "assistant":
+                messages.append({"role": "assistant", "parts": []})
+            parts = messages[-1]["parts"]
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                if block.get("type") == "text" and block.get("text"):
+                    if parts and parts[-1]["type"] == "text":
+                        parts[-1]["text"] += "\n\n" + block["text"]
+                    else:
+                        parts.append({"type": "text", "text": block["text"]})
+                elif block.get("type") == "tool_use":
+                    parts.append({"type": "tool", "name": block.get("name"), "detail": summarize_input(block.get("name"), block.get("input"))})
+        if ts:
+            first_ts = first_ts or ts
+            last_ts = ts
+    entry = {"id": Path(path).stem, "title": title, "prompts": prompts, "created": first_ts, "active": last_ts}
+    return messages, entry
+
+
+def list_sessions(cwd):
+    """This paper's sessions with at least one question, most recently active first."""
+    items = []
+    for path in transcripts_dir(cwd).glob("*.jsonl"):
+        try:
+            _, entry = scan_transcript(path)
+        except Exception:
+            log("scan failed " + str(path) + ":\n" + traceback.format_exc())
+            continue
+        if entry["prompts"]:
+            items.append(entry)
+    items.sort(key=lambda e: e["active"], reverse=True)
+    return items
+
+
+def history_for(cwd, session_id):
+    path = transcripts_dir(cwd) / (session_id + ".jsonl")
+    if not path.exists():
+        return []
+    messages, _ = scan_transcript(path)
+    # Keep the newest messages that fit in one native message.
+    while messages and len(json.dumps(messages)) > HISTORY_BUDGET:
+        messages = messages[1:]
+    return messages
 
 
 def paper_dir(paper_id):
@@ -158,7 +237,15 @@ class Session:
         directory = paper_dir(paper_id)
         directory.mkdir(parents=True, exist_ok=True)
         self.paper = {"paperId": paper_id, "title": msg.get("title") or "", "pdfUrl": msg.get("pdfUrl") or "", "dir": directory}
-        self.session_id = load_sessions().get(paper_id) if msg.get("resume") else None
+        if msg.get("fresh"):
+            self.session_id = None
+        elif msg.get("sessionId"):
+            self.session_id = msg["sessionId"]
+        else:
+            latest = list_sessions(directory)
+            self.session_id = latest[0]["id"] if latest else None
+        if self.session_id:
+            send({"type": "history", "sessionId": self.session_id, "messages": history_for(directory, self.session_id)})
         pdf = directory / "paper.pdf"
         if not pdf.exists():
             if self.paper["pdfUrl"]:
@@ -171,6 +258,10 @@ class Session:
                 send({"type": "need_pdf"})
                 return
         self.spawn()
+
+    def send_sessions(self):
+        items = list_sessions(self.paper["dir"]) if self.paper else []
+        send({"type": "sessions", "items": items, "current": self.session_id})
 
     def receive_pdf(self, msg):
         if not self.paper:
@@ -296,9 +387,8 @@ class Session:
         kind = event.get("type")
         if kind == "system" and event.get("subtype") == "init":
             sid = event.get("session_id")
-            if sid and sid != self.session_id:
+            if sid:
                 self.session_id = sid
-                save_session(self.paper["paperId"], sid)
             return
         if kind == "stream_event":
             inner = event.get("event") or {}
@@ -328,9 +418,7 @@ class Session:
             return
         if kind == "result":
             sid = event.get("session_id") or self.session_id
-            if sid and sid != self.session_id and self.paper:
-                self.session_id = sid
-                save_session(self.paper["paperId"], sid)
+            self.session_id = sid
             if event.get("is_error") and event.get("result"):
                 send({"type": "error", "message": str(event.get("result"))[:500]})
             send({"type": "done", "sessionId": sid, "error": bool(event.get("is_error"))})
@@ -355,6 +443,8 @@ def main():
                     session.start(msg)
                 elif kind == "pdf":
                     session.receive_pdf(msg)
+                elif kind == "sessions":
+                    session.send_sessions()
                 elif kind == "ask":
                     session.ask(msg)
                 elif kind == "permission":

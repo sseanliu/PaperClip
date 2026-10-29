@@ -5,13 +5,12 @@
  * the PDF in the session's working directory. Answers stream in here; tool
  * calls that need approval show Allow / Deny.
  *
- * One session per paper: reopening a paper resumes its conversation, and the
- * transcript is kept in chrome.storage.local (chat:<paperId>) so it shows
- * again. "New chat" starts over.
+ * Each paper has its own sessions, read from Claude Code's transcripts by the
+ * host: opening the chat resumes the latest one and shows it so far, the
+ * clock lists them all (switch to any and keep asking), "+" starts a new one.
  */
 (function () {
   const HOST = 'com.xiaoan.paperclip.claude';
-  const MAX_SAVED_MESSAGES = 100;
   const POSITION_KEY = 'paperclip-chat-position';
   // One-click starter shown on an empty conversation.
   const SUGGESTION = '这篇 paper 讲了什么？';
@@ -30,6 +29,8 @@
   let busy = false;
   let pendingAsk = null; // text typed before the session was ready
   let messages = []; // { role: 'user' | 'assistant', parts: [...] }
+  let sessionId = null; // the session on screen, once the host knows it
+  let historyEl = null;
   let renderQueued = false;
 
   // ---- Markdown (small, escape-first) ----------------------------------------------
@@ -115,6 +116,9 @@
           <span class="chat-label">Claude Code</span>
           <span class="chat-paper" id="chatPaper"></span>
         </div>
+        <button class="chat-icon-btn" data-chat-action="history" title="Earlier chats about this paper" aria-label="Earlier chats">
+          <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>
+        </button>
         <button class="chat-icon-btn" data-chat-action="new" title="New chat" aria-label="New chat">
           <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
         </button>
@@ -123,6 +127,7 @@
         </button>
       </div>
       <div class="chat-list" id="chatList"></div>
+      <div class="chat-history" id="chatHistory" hidden></div>
       <div class="chat-notice" id="chatNotice" hidden></div>
       <div class="chat-compose">
         <textarea class="chat-input" id="chatInput" rows="1" placeholder="Ask about this paper…"></textarea>
@@ -135,6 +140,7 @@
     sendBtn = win.querySelector('.chat-send');
     titleEl = win.querySelector('#chatPaper');
     noticeEl = win.querySelector('#chatNotice');
+    historyEl = win.querySelector('#chatHistory');
 
     win.addEventListener('click', (e) => {
       const btn = e.target.closest('[data-chat-action]');
@@ -142,6 +148,8 @@
       const action = btn.dataset.chatAction;
       if (action === 'close') hide();
       else if (action === 'new') newChat();
+      else if (action === 'history') toggleHistory();
+      else if (action === 'open-session') openSession(btn.dataset.sessionId);
       else if (action === 'send') (busy ? interrupt() : submit());
       else if (action === 'suggest' && !busy) submit(SUGGESTION);
       else if (action === 'allow' || action === 'deny') answerPermission(btn.dataset.requestId, action === 'allow');
@@ -242,30 +250,25 @@
 
   // ---- Session ---------------------------------------------------------------------
 
-  function storageKey(id) {
-    return `chat:${id}`;
-  }
-
   /**
-   * Opens the host and starts (or resumes) the paper's session. `fresh` drops
-   * the saved conversation; `reconnect` keeps the messages on screen (the
-   * bridge went away mid-conversation) and sends `ask` once ready.
+   * Opens the host and starts a session for the paper: `sessionId` resumes
+   * that one, `fresh` starts a new one, otherwise the latest is resumed. The
+   * host sends the resumed session's messages. `reconnect` keeps what's on
+   * screen (the bridge went away mid-conversation) and sends `ask` once ready.
    */
-  async function connect(next, { fresh = false, reconnect = false, ask = null } = {}) {
+  function connect(next, { fresh = false, sessionId: wanted = null, reconnect = false, ask = null } = {}) {
     disconnect();
     paper = next;
     ready = false;
     pendingAsk = ask;
-    if (!reconnect) setBusy(false);
+    closeHistory();
+    if (!reconnect) {
+      setBusy(false);
+      messages = [];
+      sessionId = null;
+    }
     titleEl.textContent = paper.title;
     titleEl.title = paper.title;
-    if (fresh) {
-      messages = [];
-      await chrome.storage.local.remove(storageKey(paper.id));
-    } else if (!reconnect) {
-      const stored = (await chrome.storage.local.get(storageKey(paper.id)))[storageKey(paper.id)];
-      messages = Array.isArray(stored) ? stored : [];
-    }
     renderAll();
     notice('Starting Claude Code…');
     try {
@@ -288,7 +291,14 @@
         notice(`Claude bridge stopped: ${err}`);
       }
     });
-    port.postMessage({ type: 'start', paperId: paper.id, title: paper.title, pdfUrl: paper.pdfUrl || '', resume: !fresh });
+    port.postMessage({
+      type: 'start',
+      paperId: paper.id,
+      title: paper.title,
+      pdfUrl: paper.pdfUrl || '',
+      sessionId: wanted || (reconnect ? sessionId : null),
+      fresh,
+    });
   }
 
   function disconnect() {
@@ -373,14 +383,59 @@
     return last;
   }
 
-  function save() {
-    if (!paper) return;
-    // Permission prompts only make sense live; keep what they were answered.
-    const kept = messages.slice(-MAX_SAVED_MESSAGES).map((m) => ({
-      role: m.role,
-      parts: m.parts.filter((p) => p.type !== 'permission' || p.answer),
-    }));
-    chrome.storage.local.set({ [storageKey(paper.id)]: kept });
+  // ---- History -------------------------------------------------------------------
+
+  function toggleHistory() {
+    if (win.classList.contains('is-history')) {
+      closeHistory();
+      return;
+    }
+    if (!port) {
+      notice('Claude bridge is not connected.');
+      return;
+    }
+    win.classList.add('is-history');
+    historyEl.hidden = false;
+    historyEl.innerHTML = '<div class="chat-history-empty">Loading…</div>';
+    port.postMessage({ type: 'sessions' });
+  }
+
+  function closeHistory() {
+    if (!win) return;
+    win.classList.remove('is-history');
+    if (historyEl) historyEl.hidden = true;
+  }
+
+  function when(ts) {
+    if (!ts) return '';
+    const d = new Date(ts);
+    const today = new Date().toDateString() === d.toDateString();
+    return today
+      ? d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  }
+
+  function renderHistory(items) {
+    if (!win.classList.contains('is-history')) return;
+    if (!items.length) {
+      historyEl.innerHTML = '<div class="chat-history-empty">No earlier chats about this paper yet.</div>';
+      return;
+    }
+    historyEl.innerHTML = items.map((item) => `
+      <button class="chat-history-item${item.id === sessionId ? ' is-current' : ''}" data-chat-action="open-session" data-session-id="${esc(item.id)}">
+        <span class="chat-history-title">${esc(item.title || '(untitled)')}</span>
+        <span class="chat-history-meta">${esc(when(item.active))} · ${item.prompts} question${item.prompts === 1 ? '' : 's'}${item.id === sessionId ? ' · current' : ''}</span>
+      </button>`).join('');
+  }
+
+  function openSession(id) {
+    if (!paper || !id) return;
+    if (id === sessionId) {
+      closeHistory();
+      return;
+    }
+    connect(paper, { sessionId: id });
+    inputEl.focus();
   }
 
   function onHostMessage(msg) {
@@ -391,8 +446,17 @@
       case 'need_pdf':
         sendPdf();
         break;
+      case 'history':
+        sessionId = msg.sessionId;
+        messages = Array.isArray(msg.messages) ? msg.messages : [];
+        renderAll();
+        break;
+      case 'sessions':
+        renderHistory(msg.items || []);
+        break;
       case 'ready':
         ready = true;
+        if (msg.sessionId) sessionId = msg.sessionId;
         notice('');
         if (pendingAsk) {
           port.postMessage({ type: 'ask', text: pendingAsk });
@@ -421,8 +485,8 @@
         break;
       case 'done':
         setBusy(false);
+        if (msg.sessionId) sessionId = msg.sessionId;
         queueRender();
-        save();
         break;
     }
   }
@@ -494,6 +558,13 @@
     });
   }
 
+  // Transcripts used to be copied into chrome.storage.local as chat:<paperId>;
+  // the host reads Claude Code's own transcripts now, so drop the copies.
+  chrome.storage.local.getKeys().then((keys) => {
+    const stale = keys.filter((k) => k.startsWith('chat:'));
+    if (stale.length) chrome.storage.local.remove(stale);
+  });
+
   // ---- Triggers --------------------------------------------------------------------
 
   addEventListener('keydown', (e) => {
@@ -506,11 +577,13 @@
       else show();
       return;
     }
-    // Esc closes the chat before anything else (the reader stays open).
+    // Esc leaves the history list, then closes the chat, before anything
+    // else (the reader stays open).
     if (e.key === 'Escape' && isShown()) {
       e.preventDefault();
       e.stopImmediatePropagation();
-      hide();
+      if (win.classList.contains('is-history')) closeHistory();
+      else hide();
     }
   }, true);
 
