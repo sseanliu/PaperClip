@@ -33,6 +33,7 @@
   let messages = []; // { role: 'user' | 'assistant', parts: [...] }
   let sessionId = null; // the session on screen, once the host knows it
   let historyEl = null;
+  let imageChunks = {}; // history image ref -> base64 received so far
   let renderQueued = false;
 
   // ---- Markdown (small, escape-first) ----------------------------------------------
@@ -582,8 +583,22 @@
       case 'history':
         sessionId = msg.sessionId;
         messages = Array.isArray(msg.messages) ? msg.messages : [];
+        imageChunks = {};
         renderAll();
         break;
+      case 'history_image': {
+        // An earlier session's pasted image, in pieces (1 MB message cap).
+        if (msg.sessionId !== sessionId) break;
+        imageChunks[msg.ref] = (imageChunks[msg.ref] || '') + msg.chunk;
+        if (!msg.last) break;
+        const src = `data:${msg.mediaType};base64,${imageChunks[msg.ref]}`;
+        delete imageChunks[msg.ref];
+        for (const m of messages) {
+          for (const p of m.parts) if (p.type === 'image' && p.ref === msg.ref) p.src = src;
+        }
+        renderAll();
+        break;
+      }
       case 'sessions':
         renderHistory(msg.items || []);
         break;

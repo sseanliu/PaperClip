@@ -35,7 +35,11 @@ Extension -> host
 Host -> extension
   {"type": "status", "text"}
   {"type": "need_pdf"}                     the host couldn't download it
-  {"type": "history", "sessionId", "messages"}   the resumed session so far
+  {"type": "history", "sessionId", "messages"}   the resumed session so far;
+                                           images in it are {"type": "image", "ref"}
+  {"type": "history_image", "sessionId", "ref", "mediaType", "chunk", "last"}
+                                           an image's base64 in pieces under the
+                                           1 MB message cap, sent after history
   {"type": "sessions", "items": [{"id", "title", "prompts", "created", "active"}]}
   {"type": "ready", "sessionId", "resumed": bool}
   {"type": "text", "text"}                 assistant text, streamed
@@ -67,6 +71,7 @@ HOME = Path.home()
 ROOT = HOME / "Library" / "Caches" / "PaperClip" / "claude"
 PROJECTS = HOME / ".claude" / "projects"
 HISTORY_BUDGET = 900_000  # bytes of history JSON per message (Chrome caps a host message at 1 MB)
+IMAGE_CHUNK = 700_000  # base64 characters per history_image message
 LOG = Path("/tmp/paperclip-claude-host.log")
 # Chrome starts hosts with a minimal PATH; claude and the tools it runs live here.
 EXTRA_PATH = [str(HOME / ".local" / "bin"), "/opt/homebrew/bin", "/usr/local/bin"]
@@ -118,8 +123,10 @@ def transcripts_dir(cwd):
     return PROJECTS / re.sub(r"[^A-Za-z0-9]", "-", str(cwd))
 
 
-def scan_transcript(path):
-    """The session as chat messages ({role, parts}) plus its list entry."""
+def scan_transcript(path, images=None):
+    """The session as chat messages ({role, parts}) plus its list entry. When
+    `images` is a list, pasted images are appended to it as (mediaType, data)
+    and their parts carry the index as "ref"."""
     messages = []
     first_ts = last_ts = ""
     title = ""
@@ -149,8 +156,14 @@ def scan_transcript(path):
                 if b.get("type") == "text" and b.get("text", "").strip() and not b["text"].startswith("<"):
                     parts.append({"type": "text", "text": b["text"]})
                 elif b.get("type") == "image":
-                    # Pixels stay out: a few screenshots would pass the 1 MB message cap.
-                    parts.append({"type": "image"})
+                    # Pixels travel separately (history_image): a few screenshots
+                    # would pass the 1 MB message cap.
+                    part = {"type": "image"}
+                    source = b.get("source") or {}
+                    if images is not None and source.get("type") == "base64" and source.get("data"):
+                        part["ref"] = len(images)
+                        images.append((source.get("media_type") or "image/png", source["data"]))
+                    parts.append(part)
             if not parts:
                 continue
             prompts += 1
@@ -196,14 +209,34 @@ def list_sessions(cwd):
 
 
 def history_for(cwd, session_id):
+    """(messages, images) of a session; images as (mediaType, base64)."""
     path = transcripts_dir(cwd) / (session_id + ".jsonl")
     if not path.exists():
-        return []
-    messages, _ = scan_transcript(path)
+        return [], []
+    images = []
+    messages, _ = scan_transcript(path, images)
     # Keep the newest messages that fit in one native message.
     while messages and len(json.dumps(messages)) > HISTORY_BUDGET:
         messages = messages[1:]
-    return messages
+    return messages, images
+
+
+def send_history(cwd, session_id):
+    messages, images = history_for(cwd, session_id)
+    send({"type": "history", "sessionId": session_id, "messages": messages})
+    kept = {p["ref"] for m in messages for p in m["parts"] if p.get("type") == "image" and "ref" in p}
+    for ref, (media_type, data) in enumerate(images):
+        if ref not in kept:
+            continue
+        for start in range(0, len(data), IMAGE_CHUNK):
+            send({
+                "type": "history_image",
+                "sessionId": session_id,
+                "ref": ref,
+                "mediaType": media_type,
+                "chunk": data[start:start + IMAGE_CHUNK],
+                "last": start + IMAGE_CHUNK >= len(data),
+            })
 
 
 def paper_dir(paper_id):
@@ -260,7 +293,7 @@ class Session:
             latest = list_sessions(directory)
             self.session_id = latest[0]["id"] if latest else None
         if self.session_id:
-            send({"type": "history", "sessionId": self.session_id, "messages": history_for(directory, self.session_id)})
+            send_history(directory, self.session_id)
         pdf = directory / "paper.pdf"
         if not pdf.exists():
             if self.paper["pdfUrl"]:
