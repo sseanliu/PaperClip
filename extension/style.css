@@ -2316,7 +2316,9 @@ body.chat-dragging .chat-header {
 }
 
 .chat-input:focus {
-  border-color: var(--accent-amber);
+  /* The resting border, a little stronger: mixed toward the text color, so
+     it reads as active in both light and dark without an accent color. */
+  border-color: color-mix(in srgb, var(--warm-gray), var(--ink) 18%);
 }
 
 .chat-send {
