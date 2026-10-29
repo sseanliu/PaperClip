@@ -668,6 +668,25 @@ header {
   color: var(--muted);
 }
 
+.settings-toggle {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+
+.settings-toggle input {
+  margin: 2px 0 0;
+  accent-color: var(--accent-amber);
+}
+
+.settings-toggle-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .settings-info,
 .settings-status {
   padding: 6px 12px 8px;
@@ -2457,3 +2476,9 @@ body.pdf-panel-open {
   border-color: color-mix(in srgb, var(--warm-gray), var(--ink) 18%);
 }
 
+
+/* reader.html: a PDF the browser opened fills the tab on the page color,
+   with no library underneath. */
+body.reader-page {
+  background: var(--paper);
+}

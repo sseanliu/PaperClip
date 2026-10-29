@@ -1326,6 +1326,7 @@ function initSettingsMenu() {
       menu.hidden = false;
       refreshSettingsInfo();
       refreshKeyField();
+      refreshPdfToggle();
     } else {
       menu.hidden = true;
     }
@@ -1345,6 +1346,20 @@ function initSettingsMenu() {
       if (key) await chrome.storage.local.set({ deepinfraKey: key });
       else await chrome.storage.local.remove('deepinfraKey');
       setSettingsStatus(key ? 'API key saved.' : 'API key removed.');
+    });
+  }
+
+  // PDFs on the web open in the reader (background.js redirect rule).
+  const pdfToggle = document.getElementById('openPdfsInReader');
+  async function refreshPdfToggle() {
+    if (!pdfToggle) return;
+    const { openPdfsInReader = true } = await chrome.storage.local.get('openPdfsInReader');
+    pdfToggle.checked = openPdfsInReader;
+  }
+  if (pdfToggle) {
+    pdfToggle.addEventListener('change', async () => {
+      await chrome.storage.local.set({ openPdfsInReader: pdfToggle.checked });
+      setSettingsStatus(pdfToggle.checked ? 'PDFs open in PaperClip.' : "PDFs open in Chrome's viewer.");
     });
   }
 

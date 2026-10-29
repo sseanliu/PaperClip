@@ -8,7 +8,7 @@
  * pages onto canvases. Pages render lazily as they scroll into view.
  *
  * Exposes window.PaperViewer = { open(paper, { focus }), close(), isOpen(),
- * isOpenFor(id), current() } for app.js (a non-module script) to call, and
+ * isOpenFor(id), current(), setTitle(title) } for app.js (a non-module script) to call, and
  * fires a `paperviewer:change` event on document whenever the open paper
  * changes (detail { paper, pdfUrl, focus }, or null once closed; focus is
  * true when the user opened it, false for a keyboard preview).
@@ -27,6 +27,11 @@ let currentDoc = null;
 let currentPaperId = null;
 let currentPaper = null;
 let currentUrl = null;
+let currentPdfUrl = null;
+// Set on reader.html, where the reader is the whole tab: a PDF the browser
+// opened. { onOpenNative, onDownload, onDocument } from reader.js; there is
+// no library behind it to close back to.
+let standalone = null;
 let pageObserver = null;
 let renderGeneration = 0; // invalidates in-flight renders when doc changes
 
@@ -144,24 +149,29 @@ function focusReader(tries = 20) {
 // inside it, and zoom scales the paper within the window.
 const READING_WIDTH = 1000;
 
-async function open(paper, { focus = false } = {}) {
+async function open(paper, { focus = false, pdfUrl = null, standalone: page = null } = {}) {
   if (!els() || !paper) return;
 
-  const url = pdfUrlFor(paper);
+  standalone = page;
+  const url = pdfUrl || pdfUrlFor(paper);
   currentPaperId = paper.id;
   currentPaper = paper;
+  currentPdfUrl = url;
   currentUrl = url || paper.url || null;
-  document.dispatchEvent(new CustomEvent('paperviewer:change', { detail: { paper, pdfUrl: url, focus } }));
+  document.dispatchEvent(new CustomEvent('paperviewer:change', {
+    detail: { paper, pdfUrl: url, focus, standalone: !!standalone },
+  }));
   // Reading a paper here counts as opening it ("Recently opened" sort); a
-  // keyboard preview while moving through the list doesn't.
-  if (focus) {
+  // keyboard preview while moving through the list doesn't. A PDF tab was
+  // already counted as a visit by the background.
+  if (focus && !standalone) {
     PaperStore.update(paper.id, (p) => { p.lastSeenAt = new Date().toISOString(); }).catch(() => {});
   }
 
   titleEl.textContent = paper.title || paper.url || 'Untitled';
   titleEl.title = titleEl.textContent;
   panel.hidden = false;
-  if (backdrop) backdrop.hidden = false;
+  if (backdrop) backdrop.hidden = !!standalone;
   document.body.classList.add('pdf-panel-open');
 
   await teardownDoc();
@@ -193,15 +203,21 @@ async function open(paper, { focus = false } = {}) {
       // The Lector toolbar carries the title and window buttons; the panel
       // header is hidden in this mode.
       title: titleEl.textContent,
-      onClose: close,
-      // Once the whole file has arrived, keep it for the next open.
-      onLoad: cached ? undefined : (proxy) => {
+      onClose: standalone ? undefined : close,
+      onLoad: (proxy) => {
+        if (standalone && standalone.onDocument) standalone.onDocument(proxy);
+        // Once the whole file has arrived, keep it for the next open.
+        if (cached) return;
         proxy.getDownloadInfo()
           .then(() => proxy.getData())
           .then((bytes) => putCachedPdf(url, bytes))
           .catch(() => {});
       },
-      onOpenTab: () => { if (currentUrl) chrome.tabs.create({ url: currentUrl }); },
+      onDownload: standalone ? standalone.onDownload : undefined,
+      openTabTitle: standalone ? "Open in Chrome's PDF viewer" : undefined,
+      onOpenTab: standalone
+        ? standalone.onOpenNative
+        : () => { if (currentUrl) chrome.tabs.create({ url: currentUrl }); },
       onError: () => {
         if (generation !== renderGeneration) return;
         teardownLector();
@@ -322,6 +338,7 @@ document.addEventListener('keydown', (e) => {
  */
 function closeOnOpenSpace(e) {
   if (!bodyEl.classList.contains('is-lector')) return;
+  if (standalone) return;
   if (window.getSelection && window.getSelection().toString()) return;
   if (e.target.closest('.lector-toolbar, .lector-thumbs, .lector-search-pane, a, button, input')) return;
   for (const canvas of bodyEl.querySelectorAll('.lector-pages canvas')) {
@@ -341,8 +358,20 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
-function current() {
-  return currentPaper ? { paper: currentPaper, pdfUrl: pdfUrlFor(currentPaper) } : null;
+/** The open paper's title arrived or changed (metadata after a PDF tab opened). */
+function setTitle(title) {
+  if (!currentPaper || !title || currentPaper.title === title) return;
+  currentPaper.title = title;
+  if (titleEl) {
+    titleEl.textContent = title;
+    titleEl.title = title;
+  }
+  if (lectorHolder && window.LectorPanel) window.LectorPanel.update(lectorHolder, { title });
+  document.dispatchEvent(new CustomEvent('paperviewer:retitle', { detail: { paperId: currentPaper.id, title } }));
 }
 
-window.PaperViewer = { open, close, isOpen, isOpenFor, current };
+function current() {
+  return currentPaper ? { paper: currentPaper, pdfUrl: currentPdfUrl } : null;
+}
+
+window.PaperViewer = { open, close, isOpen, isOpenFor, current, setTitle };

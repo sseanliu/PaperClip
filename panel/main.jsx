@@ -327,7 +327,11 @@ function LoadingCard() {
   );
 }
 
-function Viewer({ source, onError, onLoad, pageWidth = 1000, title, onClose, onOpenTab }) {
+// Pages are fetched with the user's cookies for that site, so a PDF behind a
+// login or an institutional subscription loads as it would in a tab.
+const DOCUMENT_OPTIONS = { withCredentials: true };
+
+function Viewer({ source, onError, onLoad, pageWidth = 1000, title, onClose, onOpenTab, openTabTitle, onDownload }) {
   const scheme = useSystemScheme();
   const [showThumbs, setShowThumbs] = useState(false);
   const [showSearch, setShowSearch] = useState(false);
@@ -338,6 +342,7 @@ function Viewer({ source, onError, onLoad, pageWidth = 1000, title, onClose, onO
       zoom={pageWidth / 612}
       colorScheme={scheme}
       darkModeColors={DARK_PAGE_COLORS}
+      documentOptions={DOCUMENT_OPTIONS}
       id="lectorRoot"
       tabIndex={-1}
       className="lector-root"
@@ -416,8 +421,17 @@ function Viewer({ source, onError, onLoad, pageWidth = 1000, title, onClose, onO
                 <path d="m21 21-4.3-4.3" />
               </I>
             </button>
+            {onDownload && (
+              <button type="button" className="lector-btn" title="Download" onClick={onDownload}>
+                <I>
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                  <path d="m7 10 5 5 5-5" />
+                  <path d="M12 15V3" />
+                </I>
+              </button>
+            )}
             {onOpenTab && (
-              <button type="button" className="lector-btn" title="Open in a tab" onClick={onOpenTab}>
+              <button type="button" className="lector-btn" title={openTabTitle || "Open in a tab"} onClick={onOpenTab}>
                 <I>
                   <path d="M15 3h6v6" />
                   <path d="M10 14 21 3" />
@@ -458,30 +472,46 @@ function Viewer({ source, onError, onLoad, pageWidth = 1000, title, onClose, onO
 }
 
 const roots = new WeakMap();
+const mountedProps = new WeakMap();
+
+function render(container) {
+  const { source, onError, onLoad, pageWidth, title, onClose, onOpenTab, openTabTitle, onDownload } = mountedProps.get(container);
+  roots.get(container).render(
+    <Viewer
+      source={source}
+      onError={onError}
+      onLoad={onLoad}
+      pageWidth={pageWidth}
+      title={title}
+      onClose={onClose}
+      onOpenTab={onOpenTab}
+      openTabTitle={openTabTitle}
+      onDownload={onDownload}
+    />,
+  );
+}
 
 window.LectorPanel = {
   // source: the PDF's URL, or its bytes (from the reader's cache).
-  mount(container, source, { onError, onLoad, pageWidth, title, onClose, onOpenTab } = {}) {
+  mount(container, source, options = {}) {
     this.unmount(container);
-    const root = createRoot(container);
-    roots.set(container, root);
-    root.render(
-      <Viewer
-        source={source}
-        onError={onError}
-        onLoad={onLoad}
-        pageWidth={pageWidth}
-        title={title}
-        onClose={onClose}
-        onOpenTab={onOpenTab}
-      />,
-    );
+    roots.set(container, createRoot(container));
+    mountedProps.set(container, { ...options, source });
+    render(container);
+  },
+  // Change props of the mounted viewer (a title that arrived later); the
+  // document stays loaded.
+  update(container, changes) {
+    if (!roots.has(container)) return;
+    mountedProps.set(container, { ...mountedProps.get(container), ...changes });
+    render(container);
   },
   unmount(container) {
     const root = roots.get(container);
     if (root) {
       root.unmount();
       roots.delete(container);
+      mountedProps.delete(container);
     }
   },
 };

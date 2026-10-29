@@ -48,7 +48,8 @@ const SOURCE_LABELS = {
 function looksLikeUrlOrFilename(s) {
   if (!s) return false;
   const t = s.trim();
-  if (/^https?:\/\//i.test(t)) return true;
+  // A web URL, or the reader tab's own address before its title is set.
+  if (/^(https?|chrome-extension):\/\//i.test(t)) return true;
   // host/path with no spaces (real titles always have spaces)
   if (/^[a-z0-9.-]+\.[a-z]{2,}\/\S+$/i.test(t) && !/\s/.test(t)) return true;
   // bare PDF filename
@@ -113,6 +114,9 @@ const lastCapturedByTab = new Map();
  */
 async function capturePaper(tab, mode = 'visit') {
   if (!tab || !tab.url) return;
+  // A PDF shown in PaperClip's reader is captured under its own URL.
+  const target = readerTarget(tab.url);
+  if (target) tab = { ...tab, url: target };
   const cls = classifyPaper(tab.url);
   if (!cls) {
     if (tab.id != null) lastCapturedByTab.delete(tab.id);
@@ -622,9 +626,88 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   }
 });
 
+// ---------------------------------------------------------------------------
+// PDFs open in PaperClip's reader. A main-frame response served as a PDF is
+// redirected to reader.html#<its URL>; the rule matches on the response's
+// Content-Type, so links without ".pdf" (arxiv.org/pdf/<id>, openreview
+// pdf?id=) count too. Settings can turn it off (openPdfsInReader).
+// ---------------------------------------------------------------------------
+
+const PDF_RULE_ID = 1;
+
+async function syncPdfRule() {
+  const { openPdfsInReader = true } = await chrome.storage.local.get('openPdfsInReader');
+  await chrome.declarativeNetRequest.updateDynamicRules({
+    removeRuleIds: [PDF_RULE_ID],
+    addRules: openPdfsInReader ? [{
+      id: PDF_RULE_ID,
+      priority: 1,
+      action: {
+        type: 'redirect',
+        redirect: { regexSubstitution: `${chrome.runtime.getURL('reader.html')}#\\0` },
+      },
+      condition: {
+        regexFilter: '^https?://.*',
+        resourceTypes: ['main_frame'],
+        responseHeaders: [{ header: 'content-type', values: ['application/pdf*', 'application/x-pdf*'] }],
+      },
+    }] : [],
+  });
+}
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area === 'local' && changes.openPdfsInReader) syncPdfRule();
+});
+syncPdfRule().catch((err) => console.warn('[paperclip] PDF rule', err));
+
+// "Open in Chrome's viewer" from the reader: let this one navigation through.
+// A session rule allows main-frame loads in that tab until the PDF has
+// loaded, then goes away.
+const nativeOpenRules = new Map(); // tabId -> { ruleId, url }
+
+async function openInNativeViewer(tabId, url) {
+  const ruleId = 1000 + (tabId % 1000000);
+  await chrome.declarativeNetRequest.updateSessionRules({
+    removeRuleIds: [ruleId],
+    addRules: [{
+      id: ruleId,
+      priority: 2,
+      action: { type: 'allow' },
+      condition: { tabIds: [tabId], resourceTypes: ['main_frame'] },
+    }],
+  });
+  nativeOpenRules.set(tabId, { ruleId, url });
+  await chrome.tabs.update(tabId, { url });
+}
+
+function endNativeOpen(tabId) {
+  const entry = nativeOpenRules.get(tabId);
+  if (!entry) return;
+  nativeOpenRules.delete(tabId);
+  chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: [entry.ruleId] }).catch(() => {});
+}
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  const entry = nativeOpenRules.get(tabId);
+  if (entry && changeInfo.status === 'complete' && tab.url && !readerTarget(tab.url)) endNativeOpen(tabId);
+});
+chrome.tabs.onRemoved.addListener(endNativeOpen);
+
+// A worker restart forgets which tabs had one; drop any left behind.
+chrome.declarativeNetRequest.getSessionRules().then((rules) => {
+  const stale = rules.map((r) => r.id).filter((id) => id >= 1000);
+  if (stale.length) chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: stale });
+}).catch(() => {});
+
 // Message handler: the new-tab page asks us to re-scan tabs whenever it
 // loads, as a safety net for anything we missed.
-chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (msg && msg.type === 'paperclip:open-native' && sender.tab && msg.url) {
+    openInNativeViewer(sender.tab.id, msg.url)
+      .then(() => sendResponse({ ok: true }))
+      .catch((err) => sendResponse({ ok: false, error: String(err && err.message) }));
+    return true;
+  }
   if (msg && msg.type === 'paperclip:backfill') {
     (async () => {
       const count = await backfillExistingTabs();

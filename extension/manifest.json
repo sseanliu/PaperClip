@@ -9,7 +9,8 @@
     "storage",
     "nativeMessaging",
     "alarms",
-    "unlimitedStorage"
+    "unlimitedStorage",
+    "declarativeNetRequestWithHostAccess"
   ],
   "host_permissions": [
     "https://*/*"
@@ -17,6 +18,12 @@
   "chrome_url_overrides": {
     "newtab": "index.html"
   },
+  "web_accessible_resources": [
+    {
+      "resources": ["reader.html"],
+      "matches": ["https://*/*"]
+    }
+  ],
   "background": {
     "service_worker": "background.js"
   },

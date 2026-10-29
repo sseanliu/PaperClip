@@ -903,6 +903,15 @@
   }, true);
 
   // The session follows the reader: another paper opened, or the reader closed.
+  document.addEventListener('paperviewer:retitle', (e) => {
+    if (!paper || paper.id !== e.detail.paperId) return;
+    paper.title = e.detail.title;
+    if (titleEl) {
+      titleEl.textContent = paper.title;
+      titleEl.title = paper.title;
+    }
+  });
+
   document.addEventListener('paperviewer:change', (e) => {
     const detail = e.detail;
     if (!detail) {
@@ -918,7 +927,8 @@
     }
     // A paper opened by click comes with the chat open. Not for keyboard
     // previews from the search results: those would take focus from the
-    // search field and start a session for every paper passed over.
-    if (detail.focus && !isShown()) show();
+    // search field and start a session for every paper passed over. Nor
+    // for a PDF the browser opened in a tab: Option+Space when wanted.
+    if (detail.focus && !detail.standalone && !isShown()) show();
   });
 })();
