@@ -152,6 +152,11 @@ async function open(paper, { focus = false } = {}) {
   currentPaper = paper;
   currentUrl = url || paper.url || null;
   document.dispatchEvent(new CustomEvent('paperviewer:change', { detail: { paper, pdfUrl: url, focus } }));
+  // Reading a paper here counts as opening it ("Recently opened" sort); a
+  // keyboard preview while moving through the list doesn't.
+  if (focus) {
+    PaperStore.update(paper.id, (p) => { p.lastSeenAt = new Date().toISOString(); }).catch(() => {});
+  }
 
   titleEl.textContent = paper.title || paper.url || 'Untitled';
   titleEl.title = titleEl.textContent;
