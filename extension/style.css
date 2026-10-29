@@ -1863,7 +1863,9 @@ body.pdf-panel-open {
   position: fixed;
   top: 12vh;
   left: 50%;
-  transform: translateX(-50%);
+  /* Centering uses `translate`, so the opening animation (transform) and a
+     drag (translate, chat.js) never fight over one property. */
+  translate: -50% 0;
   /* Above the reader (250) and the translation card (260). */
   z-index: 270;
   display: flex;
@@ -1885,19 +1887,19 @@ body.pdf-panel-open {
 }
 
 @keyframes chat-in {
-  from { opacity: 0; transform: translateX(-50%) translateY(8px); }
-  to   { opacity: 1; transform: translateX(-50%); }
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
 }
 
 /* Dragged somewhere (chat.js sets left/top). */
 .chat-window.is-placed {
-  transform: none;
-  animation: chat-in-placed 0.16s ease-out;
+  translate: none;
 }
 
-@keyframes chat-in-placed {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: none; }
+/* Its own compositor layer while dragging: moving it is then a GPU
+   translate, with no repaint of the window or its shadow. */
+.chat-window.is-dragging {
+  will-change: translate;
 }
 
 body.chat-dragging {

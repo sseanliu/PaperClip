@@ -321,18 +321,30 @@
     handle.setPointerCapture(e.pointerId);
     document.body.classList.add('chat-resizing');
     document.body.dataset.chatResize = edge;
-    const move = (ev) => {
+    // Resizing has to re-lay out the content; at least do it once a frame.
+    let pointer = null;
+    let frame = 0;
+    const apply = () => {
+      frame = 0;
       let { left, top, right, bottom } = start;
-      if (edge.includes('e')) right = Math.min(innerWidth, Math.max(left + min.width, ev.clientX));
-      if (edge.includes('w')) left = Math.max(0, Math.min(right - min.width, ev.clientX));
-      if (edge.includes('s')) bottom = Math.min(innerHeight, Math.max(top + min.height, ev.clientY));
-      if (edge.includes('n')) top = Math.max(0, Math.min(bottom - min.height, ev.clientY));
+      if (edge.includes('e')) right = Math.min(innerWidth, Math.max(left + min.width, pointer.x));
+      if (edge.includes('w')) left = Math.max(0, Math.min(right - min.width, pointer.x));
+      if (edge.includes('s')) bottom = Math.min(innerHeight, Math.max(top + min.height, pointer.y));
+      if (edge.includes('n')) top = Math.max(0, Math.min(bottom - min.height, pointer.y));
       win.style.left = `${Math.round(left)}px`;
       win.style.top = `${Math.round(top)}px`;
       win.style.width = `${Math.round(right - left)}px`;
       win.style.height = `${Math.round(bottom - top)}px`;
     };
+    const move = (ev) => {
+      pointer = { x: ev.clientX, y: ev.clientY };
+      if (!frame) frame = requestAnimationFrame(apply);
+    };
     const end = () => {
+      if (frame) {
+        cancelAnimationFrame(frame);
+        apply();
+      }
       handle.removeEventListener('pointermove', move);
       handle.removeEventListener('pointerup', end);
       handle.removeEventListener('pointercancel', end);
@@ -348,32 +360,63 @@
     handle.addEventListener('pointercancel', end);
   }
 
-  /** Moves the window so its top-left is at (left, top), keeping it reachable. */
-  function placeAt(left, top) {
-    const width = win.offsetWidth || 680;
-    win.classList.add('is-placed');
-    win.style.left = `${Math.round(Math.min(innerWidth - KEEP_VISIBLE_PX, Math.max(KEEP_VISIBLE_PX - width, left)))}px`;
-    win.style.top = `${Math.round(Math.min(innerHeight - 48, Math.max(0, top)))}px`;
+  /** (left, top) moved just enough to keep the window reachable. */
+  function clampPosition(left, top, width) {
+    return {
+      left: Math.round(Math.min(innerWidth - KEEP_VISIBLE_PX, Math.max(KEEP_VISIBLE_PX - width, left))),
+      top: Math.round(Math.min(innerHeight - 48, Math.max(0, top))),
+    };
   }
 
+  /** Moves the window so its top-left is at (left, top), keeping it reachable. */
+  function placeAt(left, top) {
+    const pos = clampPosition(left, top, win.offsetWidth || 680);
+    win.classList.add('is-placed');
+    win.style.left = `${pos.left}px`;
+    win.style.top = `${pos.top}px`;
+  }
+
+  /**
+   * Header drag. While dragging, the window only gets a `translate` (moved
+   * by the compositor, no layout or repaint), updated at most once a frame;
+   * left/top are written once, on release. Writing left/top per pointer move
+   * re-laid out and repainted the window and its large shadow every time.
+   */
   function startDrag(e) {
     if (e.button !== 0 || e.target.closest('button')) return;
     e.preventDefault();
     const header = e.currentTarget;
     const rect = win.getBoundingClientRect();
+    // Pin a centered window at its current spot (same pixels, no jump).
+    placeAt(rect.left, rect.top);
+    const base = { left: parseFloat(win.style.left), top: parseFloat(win.style.top) };
     const dx = e.clientX - rect.left;
     const dy = e.clientY - rect.top;
+    let target = base;
+    let frame = 0;
     header.setPointerCapture(e.pointerId);
     document.body.classList.add('chat-dragging');
-    const move = (ev) => placeAt(ev.clientX - dx, ev.clientY - dy);
+    win.classList.add('is-dragging');
+    const move = (ev) => {
+      target = clampPosition(ev.clientX - dx, ev.clientY - dy, rect.width);
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        win.style.translate = `${target.left - base.left}px ${target.top - base.top}px`;
+      });
+    };
     const end = () => {
       header.removeEventListener('pointermove', move);
       header.removeEventListener('pointerup', end);
       header.removeEventListener('pointercancel', end);
+      cancelAnimationFrame(frame);
       document.body.classList.remove('chat-dragging');
-      if (!win.classList.contains('is-placed')) return;
+      win.classList.remove('is-dragging');
+      win.style.translate = '';
+      win.style.left = `${target.left}px`;
+      win.style.top = `${target.top}px`;
       try {
-        localStorage.setItem(POSITION_KEY, JSON.stringify({ left: parseFloat(win.style.left), top: parseFloat(win.style.top) }));
+        localStorage.setItem(POSITION_KEY, JSON.stringify(target));
       } catch {}
     };
     header.addEventListener('pointermove', move);
