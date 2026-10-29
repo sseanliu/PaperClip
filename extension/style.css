@@ -1947,8 +1947,8 @@ body.pdf-panel-open {
 /* ---- Selection translation card (translate.js) ---- */
 .translate-card {
   position: fixed;
-  /* Above the reader (250) and its toolbar. */
-  z-index: 260;
+  /* Above the reader (250), its toolbar and the Claude chat (270). */
+  z-index: 280;
   padding: 10px 14px;
   border-radius: 10px;
   background: var(--card-bg);
@@ -1980,7 +1980,7 @@ body.pdf-panel-open {
   top: 0;
   left: 0;
   will-change: translate;
-  /* Above the reader (250) and the translation card (260). */
+  /* Above the reader (250); below the translation card (280). */
   z-index: 270;
   display: flex;
   flex-direction: column;
