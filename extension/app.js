@@ -205,6 +205,23 @@ function paperMatchesFilter(p, q) {
   return hay.includes(q);
 }
 
+/**
+ * How well a search hit matches, for ordering hits (lower first): the title
+ * starts with the query, then a word of the title does, then the title has it
+ * anywhere, then only the authors, venue or link do.
+ */
+function searchRank(p, q) {
+  const title = (p.title || '').toLowerCase();
+  if (title.startsWith(q)) return 0;
+  const at = title.indexOf(q);
+  if (at < 0) return 3;
+  // A word starting with it: preceded by a space, hyphen, colon, bracket...
+  for (let i = at; i >= 0; i = title.indexOf(q, i + 1)) {
+    if (!/[\p{L}\p{N}]/u.test(title[i - 1])) return 1;
+  }
+  return 2;
+}
+
 function paperMatchesActiveTag(p) {
   switch (activeFilter.type) {
     case 'all':      return true;
@@ -704,7 +721,11 @@ async function renderLibrary(filter = '') {
   const q = filter.trim().toLowerCase();
   let filtered = q ? all.filter(p => paperMatchesFilter(p, q)) : all;
   filtered = filtered.filter(paperMatchesActiveTag);
-  const sorted = sortPapers(filtered);
+  // A search orders hits by how well the title matches; within each rank
+  // the chosen sort (recently added / opened) still holds.
+  const sorted = q
+    ? sortPapers(filtered).map((p) => [searchRank(p, q), p]).sort((a, b) => a[0] - b[0]).map(([, p]) => p)
+    : sortPapers(filtered);
 
   renderedIds = sorted.map(p => p.id);
   if (cursorId && !renderedIds.includes(cursorId)) cursorId = null;
