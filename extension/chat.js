@@ -140,7 +140,8 @@
   // $$..$$ and \[..\] are display math; $..$ and \(..\) inline. An inline $
   // must hug its content and not be followed by a digit, so "$5 and $10"
   // stays text. Unclosed delimiters (mid-stream) stay text until they close.
-  const MATH = /\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)|\$(?![\s$])((?:\\.|[^$\\\n])+?)(?<!\s)\$(?!\d)/g;
+  // A backslash-escaped \$ (or \*, \_, \`) is that character as plain text.
+  const MATH = /\\([$*_`])|\$\$([\s\S]+?)\$\$|\\\[([\s\S]+?)\\\]|\\\(([\s\S]+?)\\\)|\$(?![\s$])((?:\\.|[^$\\\n])+?)(?<!\s)\$(?!\d)/g;
   let katexLoading = null;
 
   function loadKatex() {
@@ -172,7 +173,11 @@
    * leaves alone), so "<", "*" or "_" inside a formula never reach it.
    */
   function stashMath(text, stash) {
-    return text.replace(MATH, (_, d1, d2, i1, i2) => {
+    return text.replace(MATH, (_, literal, d1, d2, i1, i2) => {
+      if (literal) {
+        stash.push(literal);
+        return `\uE000${stash.length - 1}\uE001`;
+      }
       const display = d1 !== undefined || d2 !== undefined;
       stash.push(texHtml(d1 ?? d2 ?? i1 ?? i2, display));
       return `\uE000${stash.length - 1}\uE001`;
