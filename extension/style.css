@@ -2139,7 +2139,8 @@ body.pdf-panel-open {
 .chat-md p,
 .chat-md ul,
 .chat-md ol,
-.chat-md pre {
+.chat-md pre,
+.chat-md blockquote {
   /* Paragraph spacing, clearly larger than the line spacing (as in the
      terminal, where blocks are a blank line apart). */
   margin: 0 0 14px;
@@ -2165,6 +2166,17 @@ body.pdf-panel-open {
 .chat-md ul,
 .chat-md ol {
   padding-left: 20px;
+}
+
+/* A quotation (often from the paper): set off by a rule at its left. */
+.chat-md blockquote {
+  padding: 2px 0 2px 14px;
+  border-left: 2px solid var(--warm-gray);
+  color: color-mix(in srgb, var(--ink), var(--muted) 35%);
+}
+
+.chat-md blockquote > :last-child {
+  margin-bottom: 0;
 }
 
 .chat-md hr {
