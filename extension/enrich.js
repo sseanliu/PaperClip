@@ -301,6 +301,25 @@
     return out;
   }
 
+  /** S2's record for exactly this title (normalized), or null. */
+  async function s2ByTitle(title) {
+    const q = `https://api.semanticscholar.org/graph/v1/paper/search/match?query=${encodeURIComponent(title)}&fields=title,authors,year,venue,abstract,externalIds`;
+    const r = await fetchS2WithRetry(q);
+    if (r.status === 404) return null;
+    if (!r.ok) throw new Error(`s2 title match: HTTP ${r.status}`);
+    const json = await r.json();
+    const hit = json && json.data && json.data[0];
+    if (!hit || normalizedTitle(hit.title) !== normalizedTitle(title)) return null;
+    return {
+      title: cleanWhitespace(hit.title),
+      authors: Array.isArray(hit.authors) ? hit.authors.map((a) => cleanWhitespace(a && a.name)).filter(Boolean) : [],
+      year: hit.year || null,
+      venue: hit.venue ? cleanWhitespace(hit.venue) : null,
+      abstract: hit.abstract ? cleanWhitespace(hit.abstract) : null,
+      externalIds: hit.externalIds || null,
+    };
+  }
+
   // S2's keyless API answers 429 to bursts; wait and try again a few times.
   async function fetchS2WithRetry(url) {
     let r;
@@ -319,6 +338,7 @@
 
   function s2IdentifierFor(paper) {
     if (paper.source === 'arxiv' && paper.sourceId) return `arXiv:${paper.sourceId}`;
+    if (paper.source === 'acl' && paper.sourceId) return `ACL:${paper.sourceId}`;
     if (paper.doi) return `DOI:${paper.doi}`;
     if (paper.source === 'semanticscholar' && paper.sourceId) return paper.sourceId;
     // S2 doesn't resolve Xplore URLs; the request only errors and turns the
@@ -428,6 +448,16 @@
     } catch (err) {
       supplementError = err;
       console.warn('[paperclip] S2 supplement failed', paper.id, err);
+    }
+
+    // Nothing found by id or link (a PDF on someone's site): its title, read
+    // from the PDF (thumbs.js), can still find it on S2.
+    if (!primary && !supplement && paper.titleFromPdf && paper.title) {
+      try {
+        supplement = await s2ByTitle(paper.title);
+      } catch (err) {
+        supplementError = supplementError || err;
+      }
     }
 
     if (!primary && !supplement) {

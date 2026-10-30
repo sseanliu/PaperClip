@@ -299,6 +299,95 @@ async function shrink(source) {
   return canvas.convertToBlob({ type: 'image/webp', quality: 0.8 });
 }
 
+// ---- A title from the PDF itself ------------------------------------------------
+//
+// A paper known only by a PDF link has no metadata service to ask, and its tab
+// title is the file name. The PDF names it: its own Title field when that is
+// real, else the largest text near the top of the first page.
+
+function cleanTitle(t) {
+  return (t || '').replace(/\s+/g, ' ').replace(/[\s*∗†‡§¶]+$/u, '').trim();
+}
+
+// A title worth showing: a few words, not a URL, a file name, a
+// "<Source>:<id>" stand-in or a word processor's default.
+function realTitle(t) {
+  t = cleanTitle(t);
+  return t.length >= 8 && t.split(' ').length >= 2
+    && !/^https?:\/\//i.test(t) && !/^[A-Za-z]+:\S+$/.test(t)
+    && !/^(microsoft word|title)\b|\buntitled\b|\.(docx?|pdf|tex|dvi|indd)$/i.test(t);
+}
+
+async function titleFromPdf(doc, page) {
+  try {
+    const { info } = await doc.getMetadata();
+    const t = cleanTitle(info && info.Title);
+    if (realTitle(t)) return t;
+  } catch {}
+  const vp = page.getViewport({ scale: 1 });
+  const tc = await page.getTextContent();
+  // Upright text in the top half (the arXiv stamp runs up the margin).
+  const items = [];
+  for (const it of tc.items) {
+    const [a, b, c, d, e, f] = it.transform;
+    if (!it.str.trim() || Math.abs(b) > 0.01 || Math.abs(c) > 0.01) continue;
+    const [x, y] = vp.convertToViewportPoint(e, f);
+    if (y < vp.height * 0.5) items.push({ str: it.str, size: Math.abs(d), x, x1: x + it.width, y: Math.round(y) });
+  }
+  const words = items.filter((i) => /[A-Za-z]{2}/.test(i.str));
+  if (!words.length) return null;
+  const max = Math.max(...words.map((i) => i.size));
+  // Small capitals set the initials a size up: take both.
+  const big = items.filter((i) => i.size >= max * 0.7).sort((p, q) => p.y - q.y || p.x - q.x);
+  // The run of lines starting at the line with the largest letters (not a
+  // header above it in a near size): a title over two or three lines.
+  const top = Math.max(...big.map((i) => i.size));
+  const anchor = big.find((i) => i.size >= top * 0.95).y;
+  const lines = big.filter((i) => i.y >= anchor);
+  const run = [lines[0]];
+  for (const it of lines.slice(1)) {
+    if (it.y - run[run.length - 1].y > max * 1.8) break;
+    run.push(it);
+  }
+  // Pieces of one word sit flush; a gap or a new line is a space.
+  let t = '';
+  run.forEach((it, i) => {
+    const prev = run[i - 1];
+    const joined = prev && prev.y === it.y && it.x - prev.x1 < it.size * 0.12;
+    t += (i && !joined ? ' ' : '') + it.str;
+  });
+  t = cleanTitle(t);
+  return realTitle(t) ? t : null;
+}
+
+/** For a paper whose cover exists already: open the PDF only for its title. */
+async function readPdfTitle(pdfUrl) {
+  const task = pdfjsLib.getDocument({ url: pdfUrl, disableAutoFetch: true, rangeChunkSize: 262144, disableFontFace: true });
+  try {
+    const doc = await Promise.race([task.promise, new Promise((_, reject) => setTimeout(() => reject(new Error('timed out')), NET_TIMEOUT_MS))]);
+    return await titleFromPdf(doc, await doc.getPage(1));
+  } finally {
+    try { await task.destroy(); } catch {}
+  }
+}
+
+/** Give a paper the title its PDF carries, if it has none of its own. */
+async function adoptPdfTitle(p, title) {
+  await PaperStore.update(p.id, (x) => {
+    x.pdfTitleCheckedAt = Date.now();
+    if (title && !realTitle(x.title)) {
+      x.title = title;
+      x.titleFromPdf = true;
+      // Now there is something to look the paper up by (enrich.js).
+      if (x.enrichmentStatus !== 'ok') x.enrichmentStatus = 'pending';
+    }
+  });
+}
+
+function needsPdfTitle(p) {
+  return !realTitle(p.title) && !p.pdfTitleCheckedAt;
+}
+
 async function renderFirstPage(pdfUrl) {
   const task = pdfjsLib.getDocument({
     url: pdfUrl,
@@ -340,7 +429,11 @@ async function drawFirstPage(task, pdfUrl) {
   const large = await new Promise(r => canvas.toBlob(r, 'image/webp', 0.8));
   const small = await shrink(canvas);
   await keepWholePdf(doc, pdfUrl);
-  return { large, small };
+  let title = null;
+  try {
+    title = await titleFromPdf(doc, page);
+  } catch {}
+  return { large, small, title };
 }
 
 /**
@@ -421,7 +514,21 @@ async function workQueue() {
     if (document.hidden) return;
     const rec = records.get(p.id);
     const current = rec && rec.v === THUMB_VERSION;
-    if (current && (rec.small || rec.large)) continue;
+    if (current && (rec.small || rec.large)) {
+      // Covered already; a paper still without a title gets one from its PDF.
+      const pdfUrl = needsPdfTitle(p) && pdfUrlFor(p);
+      if (pdfUrl) {
+        let title = null;
+        try {
+          title = await readPdfTitle(pdfUrl);
+        } catch (err) {
+          console.warn('[paperclip] PDF title failed', p.id, err && err.message);
+        }
+        await adoptPdfTitle(p, title);
+        await new Promise(r => setTimeout(r, THROTTLE_MS));
+      }
+      continue;
+    }
 
     let url = pdfUrlFor(p);
     // No PDF link from the source page (ACM, IEEE, paywalled publishers):
@@ -472,6 +579,8 @@ async function workQueue() {
     }
 
     if (!next) continue;
+    if (needsPdfTitle(p) && !next.failedAt) await adoptPdfTitle(p, next.title);
+    delete next.title;
     await putRecord(next);
     announce([p.id], [next]);
     await new Promise(r => setTimeout(r, THROTTLE_MS));

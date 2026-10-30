@@ -153,7 +153,9 @@
 
     // ── ACL Anthology ──────────────────────────────────────────────────────
     if (host === 'aclanthology.org') {
-      const m = path.match(/^\/(\d{4}\.[\w\-]+|[A-Z]\d{2}-\d+)(?:\.pdf)?\/?$/);
+      // 2026.acl-long.1167, 2023.findings-emnlp.42; older D19-1670. The PDF
+      // may also sit under /anthology-files/pdf/<venue>/.
+      const m = path.match(/^\/(?:anthology-files\/pdf\/[\w\-]+\/)?(\d{4}\.[\w\-]+\.\d+|[A-Z]\d{2}-\d+)(?:\.pdf)?\/?$/);
       if (m) return { source: 'acl', sourceId: m[1], canonicalId: `acl:${m[1]}` };
     }
 
