@@ -690,7 +690,6 @@ function clearList(list) {
 async function renderLibrary(filter = '') {
   const list = document.getElementById('paperList');
   const header = document.getElementById('paperListHeader');
-  const countEl = document.getElementById('paperCount');
   const emptyEl = document.getElementById('paperEmpty');
   if (!list) return;
 
@@ -716,7 +715,6 @@ async function renderLibrary(filter = '') {
     emptyEl.style.display = 'flex';
     emptyEl.querySelector('[data-empty-state="initial"]').style.display = 'block';
     emptyEl.querySelector('[data-empty-state="no-results"]').style.display = 'none';
-    countEl.textContent = '';
     return;
   }
 
@@ -726,7 +724,6 @@ async function renderLibrary(filter = '') {
     emptyEl.style.display = 'flex';
     emptyEl.querySelector('[data-empty-state="initial"]').style.display = 'none';
     emptyEl.querySelector('[data-empty-state="no-results"]').style.display = 'block';
-    countEl.textContent = `0 of ${all.length}`;
     return;
   }
 
@@ -734,10 +731,6 @@ async function renderLibrary(filter = '') {
   const gallery = viewMode === 'gallery';
   list.classList.toggle('is-gallery', gallery);
   if (header) header.style.display = gallery ? 'none' : 'grid';
-  const isFiltered = q || activeFilter.type !== 'all';
-  countEl.textContent = isFiltered
-    ? `${sorted.length} of ${all.length}`
-    : `${all.length} paper${all.length === 1 ? '' : 's'}`;
   // Thumbnails come from thumbs.js (IndexedDB blobs as object URLs).
   const thumbs = window.PaperThumbs;
   if (thumbs) await thumbs.ready;
