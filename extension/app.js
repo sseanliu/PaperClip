@@ -202,7 +202,15 @@ function paperMatchesFilter(p, q) {
     SOURCE_LABELS[p.source] || p.source,
     p.url,
   ].filter(Boolean).join(' ').toLowerCase();
-  return hay.includes(q);
+  if (hay.includes(q)) return true;
+  // Loosely too: "yuda" finds "Yu-Da Song", "muller" finds "Müller".
+  const loose = foldForSearch(q);
+  return !!loose && foldForSearch(hay).includes(loose);
+}
+
+/** Lowercase text without accents, hyphens, apostrophes or dots. */
+function foldForSearch(s) {
+  return s.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[-‐‑–'’.]/g, '').toLowerCase();
 }
 
 /**
