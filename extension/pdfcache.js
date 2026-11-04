@@ -12,7 +12,7 @@
 const CACHE_NAME = 'paperclip-pdfs';
 const INDEX_KEY = 'paperclip-pdf-cache-index';
 const MAX_BYTES = 500 * 1024 * 1024;
-const MAX_FILE_BYTES = 60 * 1024 * 1024;
+const MAX_FILE_BYTES = 150 * 1024 * 1024;
 // An unversioned arXiv link can gain a newer version; refetch after a month.
 const MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
